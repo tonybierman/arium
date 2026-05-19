@@ -15,6 +15,7 @@ use dx_auth::ui::components::button::{Button, ButtonVariant};
 use dx_auth::ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
 use dx_auth::ui::components::input::Input;
 use dx_auth::ui::components::label::Label;
+use dx_auth::ui::components::tabs::{TabContent, TabList, TabTrigger, Tabs};
 use dx_auth::ui::{LoginPanel, LoginProvider, LoginSubmit, SubmitKind};
 use dx_auth::{
     friendly_server_error, LoginOutcome, MfaSetupView, MfaStatusView, ProviderId, UserProfile,
@@ -104,7 +105,6 @@ fn app() -> Element {
 #[component]
 fn Home() -> Element {
     let mut profile = use_resource(get_current_user_profile);
-    let mut permissions = use_action(get_permissions);
     let mut logout = use_action(logout);
 
     let providers_resource = use_resource(available_providers);
@@ -144,7 +144,7 @@ fn Home() -> Element {
         main { class: "app-shell",
             if logged_in {
                 ProfileCard { profile: current }
-                div { class: "app-actions",
+                div { class: "app-actions-buttons",
                     Button {
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| async move {
@@ -153,20 +153,27 @@ fn Home() -> Element {
                         },
                         "Sign out"
                     }
-                    a { class: "app-link", href: "/account/settings", "Account" }
-                    a { class: "app-link", href: "/account/mfa", "Two-factor auth" }
-                    a { class: "app-link", href: "/admin/users", "Admin" }
-                    a { class: "app-link", href: "/admin/audit", "Audit log" }
-                    Button {
-                        variant: ButtonVariant::Outline,
-                        onclick: move |_| async move {
-                            permissions.call().await;
-                        },
-                        "Fetch permissions"
-                    }
                 }
-                if let Some(Ok(perms)) = permissions.value().as_ref() {
-                    pre { class: "app-debug", "Permissions: {perms:?}" }
+                Tabs {
+                    default_value: "account".to_string(),
+                    TabList {
+                        TabTrigger { index: 0_usize, value: "account".to_string(), "Account" }
+                        TabTrigger { index: 1_usize, value: "mfa".to_string(),     "Two-factor auth" }
+                        TabTrigger { index: 2_usize, value: "admin".to_string(),   "Admin" }
+                        TabTrigger { index: 3_usize, value: "audit".to_string(),   "Audit log" }
+                    }
+                    TabContent { index: 0_usize, value: "account".to_string(),
+                        dx_auth::ui::AccountSettings { mfa_setup_href: "/account/mfa" }
+                    }
+                    TabContent { index: 1_usize, value: "mfa".to_string(),
+                        MfaSetup {}
+                    }
+                    TabContent { index: 2_usize, value: "admin".to_string(),
+                        AdminTabContent {}
+                    }
+                    TabContent { index: 3_usize, value: "audit".to_string(),
+                        dx_auth::ui::AuditLog {}
+                    }
                 }
             } else if pending_mfa() {
                 MfaChallengeView {
@@ -226,30 +233,32 @@ fn ProfileCard(profile: UserProfile) -> Element {
     let html_url = profile.html_url.clone();
 
     rsx! {
-        Card { class: "profile-card",
-            CardHeader {
-                div { class: "profile-card-identity",
-                    Avatar {
-                        if let Some(url) = avatar_url.as_ref() {
-                            AvatarImage { src: "{url}", alt: "{display_name}" }
+        div { class: "profile-card",
+            Card {
+                CardHeader {
+                    div { class: "profile-card-identity",
+                        Avatar {
+                            if let Some(url) = avatar_url.as_ref() {
+                                AvatarImage { src: "{url}", alt: "{display_name}" }
+                            }
+                            AvatarFallback { "{initials(&display_name)}" }
                         }
-                        AvatarFallback { "{initials(&display_name)}" }
-                    }
-                    div { class: "profile-card-text",
-                        CardTitle { "{display_name}" }
-                        CardDescription { "@{handle}" }
+                        div { class: "profile-card-text",
+                            CardTitle { "{display_name}" }
+                            CardDescription { "@{handle}" }
+                        }
                     }
                 }
-            }
-            CardContent {
-                ul { class: "profile-card-meta",
-                    if let Some(addr) = email {
-                        li { "Email: {addr}" }
-                    }
-                    if let Some(url) = html_url {
-                        li {
-                            "Profile: "
-                            a { href: "{url}", target: "_blank", "{url}" }
+                CardContent {
+                    ul { class: "profile-card-meta",
+                        if let Some(addr) = email {
+                            li { "Email: {addr}" }
+                        }
+                        if let Some(url) = html_url {
+                            li {
+                                "Profile: "
+                                a { href: "{url}", target: "_blank", "{url}" }
+                            }
                         }
                     }
                 }
@@ -906,6 +915,27 @@ fn AdminAuditPage() -> Element {
         main { class: "app-shell",
             dx_auth::ui::AuditLog {}
             p { class: "auth-aux", a { href: "/", "← Back to home" } }
+        }
+    }
+}
+
+/// In-tab admin view. Keeps user-list/user-detail switching local to the
+/// Admin tab so clicking a row doesn't navigate the user away from the
+/// tabbed home page.
+#[component]
+fn AdminTabContent() -> Element {
+    let mut selected = use_signal::<Option<i64>>(|| None);
+
+    rsx! {
+        if let Some(uid) = selected() {
+            dx_auth::ui::AdminUserDetail {
+                user_id: uid,
+                on_back: move |_| selected.set(None),
+            }
+        } else {
+            dx_auth::ui::AdminUserList {
+                on_select: move |id: i64| selected.set(Some(id)),
+            }
         }
     }
 }

@@ -1,13 +1,31 @@
 use dioxus::prelude::*;
+use dioxus_primitives::checkbox::CheckboxState;
 
 use crate::friendly_server_error;
 use crate::server::{
     admin_get_user, admin_list_roles, admin_list_users, admin_set_user_roles,
     admin_soft_delete_user,
 };
+use crate::ui::components::badge::{Badge, BadgeVariant};
 use crate::ui::components::button::{Button, ButtonVariant};
 use crate::ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
+use crate::ui::components::checkbox::Checkbox;
+use crate::ui::components::pagination::{
+    Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
+};
+use crate::ui::components::skeleton::Skeleton;
 use crate::wire::AdminUserSummary;
+
+/// Companion stylesheet for the admin tables / detail layout. Same trick
+/// the LoginPanel uses: render `document::Stylesheet` so the link tag is
+/// reliably in the page even on post-hydration client-side mounts.
+const ADMIN_CSS: Asset = asset!(
+    "/src/ui/admin/style.css",
+    AssetOptions::css_module()
+);
+
+#[css_module("/src/ui/admin/style.css")]
+struct Styles;
 
 /// Paginated user list. Renders 100 users at a time; clicking a row fires
 /// `on_select(user_id)` so the parent can navigate to a detail page.
@@ -19,58 +37,79 @@ pub fn AdminUserList(on_select: EventHandler<i64>) -> Element {
     }));
 
     let body = match users() {
-        None => rsx! { p { "Loading…" } },
+        None => rsx! {
+            div { class: Styles::admin_skeleton_row,
+                Skeleton { style: "height: 2rem; border-radius: 0.5rem;" }
+                Skeleton { style: "height: 2rem; border-radius: 0.5rem;" }
+                Skeleton { style: "height: 2rem; border-radius: 0.5rem;" }
+            }
+        },
         Some(Err(e)) => {
             let msg = friendly_server_error(e);
-            rsx! { div { class: "auth-error", "{msg}" } }
+            rsx! { div { class: Styles::admin_error, "{msg}" } }
         }
-        Some(Ok(list)) => rsx! {
-            table { class: "dx-admin-table",
-                thead {
-                    tr {
-                        th { "User" }
-                        th { "Email" }
-                        th { "Roles" }
-                        th { "Status" }
+        Some(Ok(list)) => {
+            let last_page = list.len() < 100;
+            rsx! {
+                div { class: Styles::table_scroll,
+                    table { class: Styles::admin_table,
+                        thead {
+                            tr {
+                                th { "User" }
+                                th { "Email" }
+                                th { "Roles" }
+                                th { "Status" }
+                            }
+                        }
+                        tbody {
+                            for user in list.iter() {
+                                AdminUserRow {
+                                    key: "{user.id}",
+                                    user: user.clone(),
+                                    on_select,
+                                }
+                            }
+                        }
                     }
                 }
-                tbody {
-                    for user in list.iter() {
-                        AdminUserRow {
-                            key: "{user.id}",
-                            user: user.clone(),
-                            on_select,
+                div { class: Styles::admin_pager,
+                    Pagination {
+                        PaginationContent {
+                            PaginationItem {
+                                PaginationPrevious {
+                                    href: "#",
+                                    onclick: move |evt: MouseEvent| {
+                                        evt.prevent_default();
+                                        if page() > 0 { page.set(page() - 1); }
+                                    },
+                                }
+                            }
+                            PaginationItem {
+                                PaginationNext {
+                                    href: "#",
+                                    onclick: move |evt: MouseEvent| {
+                                        evt.prevent_default();
+                                        if !last_page { page.set(page() + 1); }
+                                    },
+                                }
+                            }
                         }
                     }
                 }
             }
-            div { class: "dx-admin-pager",
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    onclick: move |_| {
-                        if page() > 0 { page.set(page() - 1); }
-                    },
-                    "← Prev"
-                }
-                span { " Page {page() + 1} " }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    onclick: move |_| {
-                        if list.len() == 100 { page.set(page() + 1); }
-                    },
-                    "Next →"
-                }
-            }
-        },
+        }
     };
 
     rsx! {
-        Card { class: "login-panel",
-            CardHeader {
-                CardTitle { "Users" }
-                CardDescription { "Click a row to view details, change roles, or delete the account." }
+        document::Stylesheet { href: ADMIN_CSS }
+        div { class: Styles::admin_shell,
+            Card {
+                CardHeader {
+                    CardTitle { "Users" }
+                    CardDescription { "Click a row to view details, change roles, or delete the account." }
+                }
+                CardContent { {body} }
             }
-            CardContent { {body} }
         }
     }
 }
@@ -83,19 +122,28 @@ fn AdminUserRow(user: AdminUserSummary, on_select: EventHandler<i64>) -> Element
         .clone()
         .unwrap_or_else(|| user.username.clone());
     let role_names: Vec<&'static str> = user.role_ids.iter().map(|r| role_name(*r)).collect();
-    let status = if user.deleted {
-        "deleted"
+    let (status_label, status_variant) = if user.deleted {
+        ("deleted", BadgeVariant::Destructive)
     } else if user.anonymous {
-        "anonymous"
+        ("anonymous", BadgeVariant::Outline)
     } else if !user.email_verified {
-        "unverified"
+        ("unverified", BadgeVariant::Secondary)
     } else {
-        "active"
+        ("active", BadgeVariant::Primary)
     };
 
     rsx! {
         tr {
+            tabindex: "0",
+            role: "button",
             onclick: move |_| on_select.call(id),
+            onkeydown: move |evt: KeyboardEvent| {
+                let k = evt.key();
+                if matches!(k, Key::Enter) || k.to_string() == " " {
+                    evt.prevent_default();
+                    on_select.call(id);
+                }
+            },
             td {
                 strong { "{display}" }
                 " "
@@ -103,14 +151,19 @@ fn AdminUserRow(user: AdminUserSummary, on_select: EventHandler<i64>) -> Element
             }
             td { "{user.email.clone().unwrap_or_default()}" }
             td {
-                for name in role_names.iter() {
-                    span { class: "dx-role-badge", "{name}" }
-                    " "
+                span { class: Styles::admin_row_roles,
+                    for name in role_names.iter() {
+                        Badge { key: "{name}", variant: BadgeVariant::Secondary, "{name}" }
+                    }
                 }
             }
             td {
-                "{status}"
-                if user.mfa_enabled { " · 2FA" }
+                span { class: Styles::admin_row_roles,
+                    Badge { variant: status_variant, "{status_label}" }
+                    if user.mfa_enabled {
+                        Badge { variant: BadgeVariant::Outline, "2FA" }
+                    }
+                }
             }
         }
     }
@@ -137,12 +190,21 @@ pub fn AdminUserDetail(user_id: i64, on_back: EventHandler<()>) -> Element {
     let mut busy = use_signal(|| false);
 
     let body = match detail() {
-        None => rsx! { p { "Loading…" } },
+        None => rsx! {
+            div { class: Styles::admin_skeleton_row,
+                Skeleton { style: "height: 1.25rem; width: 12rem; border-radius: 0.375rem;" }
+                Skeleton { style: "height: 1rem; width: 18rem; border-radius: 0.375rem;" }
+                Skeleton { style: "height: 2.5rem; border-radius: 0.5rem;" }
+                Skeleton { style: "height: 2.5rem; border-radius: 0.5rem;" }
+            }
+        },
         Some(Err(e)) => {
             let msg = friendly_server_error(e);
-            rsx! { div { class: "auth-error", "{msg}" } }
+            rsx! { div { class: Styles::admin_error, "{msg}" } }
         }
-        Some(Ok(None)) => rsx! { p { "User not found." } },
+        Some(Ok(None)) => rsx! {
+            p { class: Styles::admin_meta_row, "User not found." }
+        },
         Some(Ok(Some(d))) => {
             let display = d
                 .summary
@@ -150,53 +212,67 @@ pub fn AdminUserDetail(user_id: i64, on_back: EventHandler<()>) -> Element {
                 .clone()
                 .unwrap_or_else(|| d.summary.username.clone());
             let current_roles = d.summary.role_ids.clone();
+            let summary_email = d.summary.email.clone();
+            let summary_deleted = d.summary.deleted;
+            let summary_username = d.summary.username.clone();
             rsx! {
-                div {
-                    h3 { "{display}" }
-                    p {
-                        "@{d.summary.username}"
-                        if d.summary.deleted { " — deleted" }
+                section { class: Styles::admin_section,
+                    h3 { class: Styles::admin_section_heading, "{display}" }
+                    div { class: Styles::admin_meta_row,
+                        span { "@" "{summary_username}" }
+                        if let Some(e) = summary_email.as_ref() {
+                            span { strong { "Email: " } "{e}" }
+                        }
+                        if summary_deleted {
+                            Badge { variant: BadgeVariant::Destructive, "deleted" }
+                        }
                     }
-                    if let Some(e) = d.summary.email.as_ref() {
-                        p { "Email: {e}" }
-                    }
+                }
 
-                    h3 { "Roles" }
+                section { class: Styles::admin_section,
+                    h3 { class: Styles::admin_section_heading, "Roles" }
                     if let Some(Ok(role_list)) = roles().as_ref() {
-                        ul { class: "dx-admin-roles",
+                        ul { class: Styles::admin_roles,
                             for r in role_list.iter() {
                                 {
                                     let r_id = r.id;
-                                    let checked = current_roles.contains(&r_id);
+                                    let is_checked = current_roles.contains(&r_id);
                                     let starting = current_roles.clone();
                                     let r_name = r.name.clone();
+                                    let r_desc = r.description.clone();
+                                    let state = if is_checked {
+                                        CheckboxState::Checked
+                                    } else {
+                                        CheckboxState::Unchecked
+                                    };
                                     rsx! {
-                                        li { key: "{r_id}",
-                                            label {
-                                                input {
-                                                    r#type: "checkbox",
-                                                    checked,
-                                                    onchange: move |evt: FormEvent| {
-                                                        let mut next = starting.clone();
-                                                        let now_on = evt.value() == "true" || evt.value() == "on";
-                                                        next.retain(|x| *x != r_id);
-                                                        if now_on { next.push(r_id); }
-                                                        busy.set(true);
-                                                        error.set(String::new());
-                                                        info_msg.set(String::new());
-                                                        spawn(async move {
-                                                            match admin_set_user_roles(user_id, next).await {
-                                                                Ok(()) => info_msg.set("Roles updated.".to_string()),
-                                                                Err(e) => error.set(friendly_server_error(e)),
-                                                            }
-                                                            busy.set(false);
-                                                            detail.restart();
-                                                        });
-                                                    },
-                                                }
-                                                " {r_name}"
-                                                if let Some(desc) = r.description.as_ref() {
-                                                    span { class: "dx-admin-role-desc", " — {desc}" }
+                                        li {
+                                            key: "{r_id}",
+                                            class: Styles::admin_role_row,
+                                            Checkbox {
+                                                checked: Some(state),
+                                                on_checked_change: move |new_state: CheckboxState| {
+                                                    let now_on = bool::from(new_state);
+                                                    let mut next = starting.clone();
+                                                    next.retain(|x| *x != r_id);
+                                                    if now_on { next.push(r_id); }
+                                                    busy.set(true);
+                                                    error.set(String::new());
+                                                    info_msg.set(String::new());
+                                                    spawn(async move {
+                                                        match admin_set_user_roles(user_id, next).await {
+                                                            Ok(()) => info_msg.set("Roles updated.".to_string()),
+                                                            Err(e) => error.set(friendly_server_error(e)),
+                                                        }
+                                                        busy.set(false);
+                                                        detail.restart();
+                                                    });
+                                                },
+                                            }
+                                            div { class: Styles::admin_role_text,
+                                                span { class: Styles::admin_role_name, "{r_name}" }
+                                                if let Some(desc) = r_desc.as_ref() {
+                                                    span { class: Styles::admin_role_desc, "{desc}" }
                                                 }
                                             }
                                         }
@@ -207,14 +283,16 @@ pub fn AdminUserDetail(user_id: i64, on_back: EventHandler<()>) -> Element {
                     }
 
                     if !info_msg().is_empty() {
-                        p { class: "auth-success", "{info_msg}" }
+                        p { class: Styles::admin_info, "{info_msg}" }
                     }
                     if !error().is_empty() {
-                        div { class: "auth-error", "{error}" }
+                        div { class: Styles::admin_error, "{error}" }
                     }
+                }
 
-                    if !d.summary.deleted {
-                        h3 { "Danger zone" }
+                if !summary_deleted {
+                    section { class: Styles::admin_section,
+                        h3 { class: Styles::admin_section_heading, "Danger zone" }
                         Button {
                             variant: ButtonVariant::Destructive,
                             onclick: move |_| {
@@ -239,21 +317,25 @@ pub fn AdminUserDetail(user_id: i64, on_back: EventHandler<()>) -> Element {
     };
 
     rsx! {
-        Card { class: "login-panel",
-            CardHeader {
-                CardTitle { "User detail" }
-                CardDescription {
-                    a {
-                        href: "#",
-                        onclick: move |evt| {
-                            evt.prevent_default();
-                            on_back.call(());
-                        },
-                        "← Back to user list"
+        document::Stylesheet { href: ADMIN_CSS }
+        div { class: Styles::admin_shell,
+            Card {
+                CardHeader {
+                    CardTitle { "User detail" }
+                    CardDescription {
+                        button {
+                            class: Styles::admin_back,
+                            r#type: "button",
+                            onclick: move |evt| {
+                                evt.prevent_default();
+                                on_back.call(());
+                            },
+                            "← Back to user list"
+                        }
                     }
                 }
+                CardContent { {body} }
             }
-            CardContent { {body} }
         }
     }
 }
