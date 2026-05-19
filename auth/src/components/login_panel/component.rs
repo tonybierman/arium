@@ -38,11 +38,14 @@ pub enum SubmitKind {
 }
 
 /// Payload delivered to `LoginPanel`'s `on_submit` when the email/password form is submitted.
+/// `remember` is only meaningful on `SignIn`; sign-up always issues a short session because
+/// the user still has to verify their email before they're really in.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct LoginSubmit {
     pub kind: SubmitKind,
     pub email: String,
     pub password: String,
+    pub remember: bool,
 }
 
 /// A reusable "Sign in" card with an email + password form (toggleable into sign-up mode)
@@ -69,6 +72,7 @@ pub fn LoginPanel(
     let mut password = use_signal(String::new);
     let mut password_confirm = use_signal(String::new);
     let mut mode = use_signal(|| SubmitKind::SignIn);
+    let mut remember = use_signal(|| false);
     let mut local_error = use_signal(String::new);
 
     let is_signup = mode() == SubmitKind::SignUp;
@@ -119,6 +123,7 @@ pub fn LoginPanel(
                                 kind: mode(),
                                 email: email_val,
                                 password: password_val,
+                                remember: remember() && !is_signup,
                             });
                         }
 
@@ -191,6 +196,17 @@ pub fn LoginPanel(
                                 value: "{password_confirm}",
                                 oninput: move |evt: FormEvent| password_confirm.set(evt.value()),
                             }
+                        }
+                    } else {
+                        label { class: Styles::login_remember,
+                            input {
+                                r#type: "checkbox",
+                                checked: remember(),
+                                oninput: move |evt: FormEvent| {
+                                    remember.set(evt.value() == "true" || evt.value() == "on");
+                                },
+                            }
+                            span { "Remember me on this device" }
                         }
                     }
 

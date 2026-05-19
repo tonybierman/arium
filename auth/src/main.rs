@@ -189,7 +189,14 @@ fn main() {
                         .with_table_name("test_table")
                         // Don't bind the session to client IP+UA. On localhost the browser may
                         // hit 127.0.0.1 on one request and ::1 on another, invalidating lookups.
-                        .with_ip_and_user_agent(false),
+                        .with_ip_and_user_agent(false)
+                        // Short-term sessions expire 2h after the last activity; long-term
+                        // ("Remember me") sessions stretch to 30d via set_longterm(true).
+                        // Cookie max-age matches the long path so the browser keeps the
+                        // cookie around long enough for the server-side row to outlive it.
+                        .with_lifetime(chrono::Duration::hours(2))
+                        .with_max_lifetime(chrono::Duration::days(30))
+                        .with_max_age(Some(chrono::Duration::days(30))),
                 )
                 .await?,
             )))
@@ -256,11 +263,11 @@ fn Home() -> Element {
 
     let on_login_submit = move |submission: LoginSubmit| {
         auth_error.set(String::new());
-        let LoginSubmit { kind, email, password } = submission;
+        let LoginSubmit { kind, email, password, remember } = submission;
         let email_for_pending = email.clone();
         spawn(async move {
             let result = match kind {
-                SubmitKind::SignIn => login_with_password(email, password).await,
+                SubmitKind::SignIn => login_with_password(email, password, remember).await,
                 SubmitKind::SignUp => register_with_password(email, password).await,
             };
             match result {
@@ -1121,19 +1128,25 @@ pub async fn register_with_password(email: String, password: String) -> Result<L
     Ok(LoginOutcome::EmailUnverified)
 }
 
-/// Log in with an existing email/password account.
+/// Log in with an existing email/password account. `remember_me` upgrades the
+/// session to the long-term branch (~30 days) via `set_longterm(true)`; the
+/// default short branch expires after the configured `lifetime` (~2h).
 #[post("/api/user/login-password", auth: auth::Session, db: DbExtension, session: SessionStore)]
-pub async fn login_with_password(email: String, password: String) -> Result<LoginOutcome> {
+pub async fn login_with_password(
+    email: String,
+    password: String,
+    remember_me: bool,
+) -> Result<LoginOutcome> {
     match auth::verify_password_user(&db.0, &email, &password).await? {
         auth::VerifyOutcome::Verified(user_id) => {
             if auth::user_has_mfa(&db.0, user_id).await? {
-                // Stash the user id in the session, but do NOT log them in
-                // yet — verify_login_mfa finalizes the login after the
-                // second factor.
+                // Stash the user id AND the remember-me preference so
+                // verify_login_mfa can honor it when finalizing.
                 let expires_at = unix_now_seconds() + MFA_PENDING_TTL_SECS;
-                session.set(MFA_PENDING_KEY, (user_id, expires_at));
+                session.set(MFA_PENDING_KEY, (user_id, expires_at, remember_me));
                 Ok(LoginOutcome::MfaRequired)
             } else {
+                session.set_longterm(remember_me);
                 auth.login_user(user_id);
                 Ok(LoginOutcome::LoggedIn)
             }
@@ -1146,11 +1159,12 @@ pub async fn login_with_password(email: String, password: String) -> Result<Logi
 }
 
 /// Submit a TOTP (or recovery) code to finish the second-factor challenge
-/// kicked off by a successful password login.
+/// kicked off by a successful password login. The `remember_me` preference
+/// captured at password-time is honored here.
 #[post("/api/user/verify-mfa", auth: auth::Session, db: DbExtension, session: SessionStore)]
 pub async fn verify_login_mfa(code: String) -> Result<LoginOutcome> {
-    let pending: Option<(i64, i64)> = session.get(MFA_PENDING_KEY);
-    let Some((user_id, expires_at)) = pending else {
+    let pending: Option<(i64, i64, bool)> = session.get(MFA_PENDING_KEY);
+    let Some((user_id, expires_at, remember_me)) = pending else {
         return Err(ServerFnError::new(
             "Your second-factor challenge expired. Please sign in again.",
         )
@@ -1169,6 +1183,7 @@ pub async fn verify_login_mfa(code: String) -> Result<LoginOutcome> {
     }
 
     session.remove(MFA_PENDING_KEY);
+    session.set_longterm(remember_me);
     auth.login_user(user_id);
     Ok(LoginOutcome::LoggedIn)
 }

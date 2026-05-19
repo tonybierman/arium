@@ -78,6 +78,20 @@
   color: var(--secondary-color-1);
 }
 
+.login-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--secondary-color-4);
+  cursor: pointer;
+}
+
+.login-remember input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--secondary-color-2);
+}
+
 .login-providers {
   display: flex;
   flex-direction: column;
