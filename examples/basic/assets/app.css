@@ -42,6 +42,12 @@ html {
   margin: 0;
 }
 
+.profile-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 .profile-card-identity {
   display: flex;
   gap: 0.75rem;
@@ -53,6 +59,16 @@ html {
   flex-direction: column;
   gap: 0.125rem;
   min-width: 0;
+}
+
+.profile-card-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.profile-card-handle {
+  color: var(--secondary-color-5);
+  font-size: 0.8125rem;
 }
 
 .profile-card-meta {

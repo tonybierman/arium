@@ -143,20 +143,10 @@ fn Home() -> Element {
     rsx! {
         main { class: "app-shell",
             if logged_in {
-                ProfileCard { profile: current.clone() }
-                div { class: "app-actions-buttons",
-                    Button {
-                        variant: ButtonVariant::Ghost,
-                        onclick: move |_| async move {
-                            logout.call().await;
-                            profile.restart();
-                        },
-                        "Sign out"
-                    }
-                }
                 {
                     let can_admin_users = current.has_permission("admin:users:read");
                     let can_audit = current.has_permission("admin:audit:read");
+                    let profile_for_tab = current.clone();
                     rsx! {
                         Tabs {
                             default_value: "account".to_string(),
@@ -171,6 +161,17 @@ fn Home() -> Element {
                                 }
                             }
                             TabContent { index: 0_usize, value: "account".to_string(),
+                                ProfileCard { profile: profile_for_tab }
+                                div { class: "app-actions-buttons",
+                                    Button {
+                                        variant: ButtonVariant::Ghost,
+                                        onclick: move |_| async move {
+                                            logout.call().await;
+                                            profile.restart();
+                                        },
+                                        "Sign out"
+                                    }
+                                }
                                 dx_auth::ui::AccountSettings { mfa_setup_href: "/account/mfa" }
                             }
                             TabContent { index: 1_usize, value: "mfa".to_string(),
@@ -248,32 +249,26 @@ fn ProfileCard(profile: UserProfile) -> Element {
 
     rsx! {
         div { class: "profile-card",
-            Card {
-                CardHeader {
-                    div { class: "profile-card-identity",
-                        Avatar {
-                            if let Some(url) = avatar_url.as_ref() {
-                                AvatarImage { src: "{url}", alt: "{display_name}" }
-                            }
-                            AvatarFallback { "{initials(&display_name)}" }
-                        }
-                        div { class: "profile-card-text",
-                            CardTitle { "{display_name}" }
-                            CardDescription { "@{handle}" }
-                        }
+            div { class: "profile-card-identity",
+                Avatar {
+                    if let Some(url) = avatar_url.as_ref() {
+                        AvatarImage { src: "{url}", alt: "{display_name}" }
                     }
+                    AvatarFallback { "{initials(&display_name)}" }
                 }
-                CardContent {
-                    ul { class: "profile-card-meta",
-                        if let Some(addr) = email {
-                            li { "Email: {addr}" }
-                        }
-                        if let Some(url) = html_url {
-                            li {
-                                "Profile: "
-                                a { href: "{url}", target: "_blank", "{url}" }
-                            }
-                        }
+                div { class: "profile-card-text",
+                    div { class: "profile-card-name", "{display_name}" }
+                    div { class: "profile-card-handle", "@{handle}" }
+                }
+            }
+            ul { class: "profile-card-meta",
+                if let Some(addr) = email {
+                    li { "Email: {addr}" }
+                }
+                if let Some(url) = html_url {
+                    li {
+                        "Profile: "
+                        a { href: "{url}", target: "_blank", "{url}" }
                     }
                 }
             }
