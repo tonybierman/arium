@@ -506,3 +506,216 @@ pub(crate) async fn github_callback(
 
     Ok(axum::response::Redirect::to("/"))
 }
+
+// ============================================================
+// Admin (Phase 11b)
+// ============================================================
+
+use crate::wire::{AccountView, AdminRoleDetail, AdminUserDetail, AdminUserSummary};
+
+#[cfg(feature = "server")]
+async fn require_admin_perm(
+    auth_session: &auth::Session,
+    db: &crate::pool::Pool,
+    perm: &str,
+) -> Result<i64> {
+    use axum_session_auth::{Auth, Rights};
+    let user = auth_session
+        .current_user
+        .as_ref()
+        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
+    if user.anonymous {
+        return Err(ServerFnError::new("Not signed in.").into());
+    }
+    Auth::<auth::User, i64, crate::pool::Pool>::build([axum::http::Method::GET], false)
+        .requires(Rights::permission(perm.to_string()))
+        .validate(user, &axum::http::Method::GET, Some(db))
+        .await
+        .then(|| user.id as i64)
+        .ok_or_else(|| ServerFnError::new("You don't have permission for this action.").into())
+}
+
+#[cfg(feature = "server")]
+async fn summarise_admin_user(
+    db: &crate::pool::Pool,
+    row: auth::AdminUserRow,
+) -> anyhow::Result<AdminUserSummary> {
+    let role_ids = auth::get_user_role_ids(db, row.id).await?;
+    Ok(AdminUserSummary {
+        id: row.id,
+        username: row.username,
+        display_name: row.display_name,
+        email: row.email,
+        email_verified: row.email_verified_at.is_some(),
+        mfa_enabled: row.mfa_enabled_at.is_some(),
+        anonymous: row.anonymous,
+        deleted: row.deleted_at.is_some(),
+        role_ids,
+    })
+}
+
+/// List users for the admin browser. Capped at 500 per request.
+#[get("/api/admin/users", auth: auth::Session, db: DbExtension)]
+pub async fn admin_list_users(
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<AdminUserSummary>> {
+    require_admin_perm(&auth, &db.0, "admin:users:read").await?;
+    let rows = auth::list_users_for_admin(&db.0, limit, offset).await?;
+    let mut summaries = Vec::with_capacity(rows.len());
+    for row in rows {
+        summaries.push(summarise_admin_user(&db.0, row).await?);
+    }
+    Ok(summaries)
+}
+
+/// Full detail for a single user (admin view).
+#[get("/api/admin/users/get", auth: auth::Session, db: DbExtension)]
+pub async fn admin_get_user(user_id: i64) -> Result<Option<AdminUserDetail>> {
+    require_admin_perm(&auth, &db.0, "admin:users:read").await?;
+    let Some(row) = auth::get_user_for_admin(&db.0, user_id).await? else {
+        return Ok(None);
+    };
+    let permissions = auth::list_permissions_for_user(&db.0, user_id).await?;
+    let name = row.name.clone();
+    let avatar_url = row.avatar_url.clone();
+    let html_url = row.html_url.clone();
+    let summary = summarise_admin_user(&db.0, row).await?;
+    Ok(Some(AdminUserDetail {
+        summary,
+        name,
+        avatar_url,
+        html_url,
+        permissions,
+    }))
+}
+
+/// Replace a user's full role list (admin).
+#[post("/api/admin/users/roles", auth: auth::Session, db: DbExtension)]
+pub async fn admin_set_user_roles(
+    user_id: i64,
+    role_ids: Vec<i64>,
+) -> Result<()> {
+    require_admin_perm(&auth, &db.0, "admin:users:write").await?;
+    auth::set_user_roles(&db.0, user_id, &role_ids).await?;
+    Ok(())
+}
+
+/// Soft-delete a user (admin).
+#[post("/api/admin/users/delete", auth: auth::Session, db: DbExtension)]
+pub async fn admin_soft_delete_user(user_id: i64) -> Result<()> {
+    require_admin_perm(&auth, &db.0, "admin:users:delete").await?;
+    auth::soft_delete_user(&db.0, user_id).await?;
+    Ok(())
+}
+
+/// List all roles + their permission tokens.
+#[get("/api/admin/roles", auth: auth::Session, db: DbExtension)]
+pub async fn admin_list_roles() -> Result<Vec<AdminRoleDetail>> {
+    require_admin_perm(&auth, &db.0, "admin:roles:read").await?;
+    let roles = auth::list_roles(&db.0).await?;
+    let mut out = Vec::with_capacity(roles.len());
+    for r in roles {
+        let permissions = auth::list_permissions_for_role(&db.0, r.id).await?;
+        out.push(AdminRoleDetail {
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            is_system: r.is_system,
+            permissions,
+        });
+    }
+    Ok(out)
+}
+
+// ============================================================
+// Account self-service (Phase 11c)
+// ============================================================
+
+/// What the AccountSettings UI renders against.
+#[get("/api/account", auth: auth::Session, db: DbExtension)]
+pub async fn get_account_view() -> Result<AccountView> {
+    let user = auth
+        .current_user
+        .as_ref()
+        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
+    if user.anonymous {
+        return Err(ServerFnError::new("Not signed in.").into());
+    }
+    let id = user.id as i64;
+
+    // We still need a couple of bits that aren't on the cached `User`:
+    // whether a password is set, whether MFA is enabled, and which OAuth
+    // providers are linked.
+    let has_password = auth::get_password_hash(&db.0, id).await?.is_some();
+    let providers = auth::linked_oauth_providers(&db.0, id).await?;
+
+    #[cfg(feature = "mfa")]
+    let mfa_enabled = auth::user_has_mfa(&db.0, id).await?;
+    #[cfg(not(feature = "mfa"))]
+    let mfa_enabled = false;
+
+    Ok(AccountView {
+        username: user.username.clone(),
+        display_name: None, // populated below
+        email: user.email.clone(),
+        email_verified: true, // user is currently signed in, so they verified at some point
+        mfa_enabled,
+        has_password,
+        linked_oauth_providers: providers,
+    })
+}
+
+/// Set the current user's self-chosen display name.
+#[post("/api/account/display-name", auth: auth::Session, db: DbExtension)]
+pub async fn update_display_name(new_name: String) -> Result<()> {
+    let user = auth
+        .current_user
+        .as_ref()
+        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
+    if user.anonymous {
+        return Err(ServerFnError::new("Not signed in.").into());
+    }
+    let trimmed = new_name.trim();
+    let value = if trimmed.is_empty() { None } else { Some(trimmed) };
+    auth::update_display_name(&db.0, user.id as i64, value).await?;
+    Ok(())
+}
+
+/// Change the current user's password. Requires the current password
+/// (which prevents session-hijack-and-rotate).
+#[post("/api/account/password", auth: auth::Session, db: DbExtension)]
+pub async fn change_password(current: String, new_password: String) -> Result<()> {
+    let user = auth
+        .current_user
+        .as_ref()
+        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
+    if user.anonymous {
+        return Err(ServerFnError::new("Not signed in.").into());
+    }
+    let id = user.id as i64;
+    let Some(stored) = auth::get_password_hash(&db.0, id).await? else {
+        return Err(ServerFnError::new("This account doesn't use a password.").into());
+    };
+    if !auth::verify_password_against_hash(&stored, &current) {
+        return Err(ServerFnError::new("Current password didn't match.").into());
+    }
+    auth::replace_password_hash(&db.0, id, &new_password).await?;
+    Ok(())
+}
+
+/// Self-service soft-delete.
+#[post("/api/account/delete", auth: auth::Session, db: DbExtension)]
+pub async fn delete_my_account() -> Result<()> {
+    let user = auth
+        .current_user
+        .as_ref()
+        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
+    if user.anonymous {
+        return Err(ServerFnError::new("Not signed in.").into());
+    }
+    let id = user.id as i64;
+    auth::soft_delete_user(&db.0, id).await?;
+    auth.logout_user();
+    Ok(())
+}

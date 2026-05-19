@@ -52,3 +52,55 @@ pub enum MfaStatusView {
     Pending,
     Enabled,
 }
+
+// ---- Admin / role wire types ----
+
+/// One row in the admin user-list response. Lightweight enough to render
+/// hundreds at a time.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AdminUserSummary {
+    pub id: i64,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub email: Option<String>,
+    pub email_verified: bool,
+    pub mfa_enabled: bool,
+    pub anonymous: bool,
+    pub deleted: bool,
+    pub role_ids: Vec<i64>,
+}
+
+/// Full admin view of a single user, returned by the detail endpoint.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AdminUserDetail {
+    pub summary: AdminUserSummary,
+    /// Display name pulled from the OAuth provider (separate from
+    /// `summary.display_name`, which is user-chosen).
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub html_url: Option<String>,
+    /// All permission tokens this user resolves to (direct + role-inherited).
+    pub permissions: Vec<String>,
+}
+
+/// A role + its permission tokens, used by the admin role browser.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AdminRoleDetail {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_system: bool,
+    pub permissions: Vec<String>,
+}
+
+/// The current user's full account view (used by the AccountSettings UI).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AccountView {
+    pub username: String,
+    pub display_name: Option<String>,
+    pub email: Option<String>,
+    pub email_verified: bool,
+    pub mfa_enabled: bool,
+    pub has_password: bool,
+    pub linked_oauth_providers: Vec<String>,
+}

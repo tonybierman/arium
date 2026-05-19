@@ -425,6 +425,157 @@ pub async fn update_display_name(
     Ok(())
 }
 
+// ---- Admin / paginated user listing ----
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AdminUserRow {
+    pub id: i64,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub email: Option<String>,
+    pub email_verified_at: Option<i64>,
+    pub mfa_enabled_at: Option<i64>,
+    pub anonymous: bool,
+    pub deleted_at: Option<i64>,
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub html_url: Option<String>,
+}
+
+/// Paginated list of users for the admin UI. Returns the `users` row plus
+/// the columns the admin list cares about; role assignments are loaded
+/// separately so we don't fan out the join.
+pub async fn list_users_for_admin(
+    db: &Pool,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<Vec<AdminUserRow>> {
+    let rows = sqlx::query_as::<_, AdminUserRow>(
+        "SELECT id, username, display_name, email, email_verified_at, \
+                mfa_enabled_at, anonymous, deleted_at, name, avatar_url, html_url \
+         FROM users \
+         ORDER BY id \
+         LIMIT $1 OFFSET $2",
+    )
+    .bind(limit.max(1).min(500))
+    .bind(offset.max(0))
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
+/// Single-user detail for the admin UI.
+pub async fn get_user_for_admin(
+    db: &Pool,
+    user_id: i64,
+) -> anyhow::Result<Option<AdminUserRow>> {
+    let row = sqlx::query_as::<_, AdminUserRow>(
+        "SELECT id, username, display_name, email, email_verified_at, \
+                mfa_enabled_at, anonymous, deleted_at, name, avatar_url, html_url \
+         FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
+}
+
+/// Tokens a single user resolves to (direct + role-derived). The same
+/// query `load_user` uses, just public for the admin detail view.
+pub async fn list_permissions_for_user(
+    db: &Pool,
+    user_id: i64,
+) -> anyhow::Result<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT token FROM user_permissions WHERE user_id = $1 \
+         UNION \
+         SELECT rp.token FROM role_permissions rp \
+         JOIN user_roles ur ON ur.role_id = rp.role_id \
+         WHERE ur.user_id = $1 \
+         ORDER BY 1",
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|(t,)| t).collect())
+}
+
+/// Permission tokens attached to a role.
+pub async fn list_permissions_for_role(
+    db: &Pool,
+    role_id: i64,
+) -> anyhow::Result<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT token FROM role_permissions WHERE role_id = $1 ORDER BY token",
+    )
+    .bind(role_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|(t,)| t).collect())
+}
+
+// ---- Account self-service helpers (called by Phase 11c server fns) ----
+
+/// Look up the current password hash for the given user (None for OAuth-only
+/// accounts). Used by `change_password` to verify the old password before
+/// writing the new one.
+pub async fn get_password_hash(
+    db: &Pool,
+    user_id: i64,
+) -> anyhow::Result<Option<String>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT password_hash FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(db)
+            .await?;
+    Ok(row.and_then(|(h,)| h))
+}
+
+/// Replace a user's password hash. Caller must have verified the old
+/// password first (or be acting via the password-reset flow).
+pub async fn replace_password_hash(
+    db: &Pool,
+    user_id: i64,
+    new_password: &str,
+) -> anyhow::Result<()> {
+    if new_password.len() < 8 {
+        anyhow::bail!("Password must be at least 8 characters.");
+    }
+    let hash = hash_password(new_password)?;
+    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        .bind(hash)
+        .bind(user_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Verify a candidate plaintext password against a stored hash.
+pub fn verify_password_against_hash(stored_hash: &str, candidate: &str) -> bool {
+    use argon2::password_hash::{PasswordHash, PasswordVerifier};
+    use argon2::Argon2;
+    let Ok(parsed) = PasswordHash::new(stored_hash) else {
+        return false;
+    };
+    Argon2::default()
+        .verify_password(candidate.as_bytes(), &parsed)
+        .is_ok()
+}
+
+/// OAuth provider names this user has linked accounts for (e.g. "github").
+pub async fn linked_oauth_providers(
+    db: &Pool,
+    user_id: i64,
+) -> anyhow::Result<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT DISTINCT provider FROM oauth_accounts WHERE user_id = $1 ORDER BY provider",
+    )
+    .bind(user_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|(p,)| p).collect())
+}
+
 /// Create a new email/password account.
 ///
 /// Returns the new user's id on success. The error is a user-facing message
