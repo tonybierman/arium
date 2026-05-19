@@ -1,20 +1,20 @@
 use dioxus::prelude::*;
 
-use crate::components::button::{Button, ButtonVariant};
-use crate::components::card::{Card, CardDescription, CardHeader, CardTitle};
-use crate::components::input::Input;
-use crate::components::label::Label;
+use crate::ui::components::button::{Button, ButtonVariant};
+use crate::ui::components::card::{Card, CardDescription, CardHeader, CardTitle};
+use crate::ui::components::input::Input;
+use crate::ui::components::label::Label;
 
 /// Same file the `#[css_module]` below points at; declared as a separate `Asset` so we can
 /// render a `document::Stylesheet` and guarantee the link tag is in the page even when the
 /// LoginPanel first mounts client-side (the css_module's OnceLock + queue_effect path
 /// doesn't reliably insert the link during post-hydration mounts).
 const LOGIN_PANEL_CSS: Asset = asset!(
-    "/src/components/login_panel/style.css",
+    "/src/ui/login_panel/style.css",
     AssetOptions::css_module()
 );
 
-#[css_module("/src/components/login_panel/style.css")]
+#[css_module("/src/ui/login_panel/style.css")]
 struct Styles;
 
 /// One third-party login provider entry.

@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-#[css_module("/src/components/input/style.css")]
+#[css_module("/src/ui/components/input/style.css")]
 struct Styles;
 
 #[component]

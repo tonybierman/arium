@@ -8,12 +8,12 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use std::collections::HashSet;
 
-pub(crate) type Session = axum_session_auth::AuthSession<User, i64, SessionSqlitePool, SqlitePool>;
-pub(crate) type AuthLayer =
+pub type Session = axum_session_auth::AuthSession<User, i64, SessionSqlitePool, SqlitePool>;
+pub type AuthLayer =
     axum_session_auth::AuthSessionLayer<User, i64, SessionSqlitePool, SqlitePool>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct User {
+pub struct User {
     pub id: i32,
     pub anonymous: bool,
     pub username: String,
@@ -25,7 +25,7 @@ pub(crate) struct User {
 }
 
 #[derive(sqlx::FromRow, Clone)]
-pub(crate) struct SqlPermissionTokens {
+pub struct SqlPermissionTokens {
     pub token: String,
 }
 
@@ -95,7 +95,7 @@ impl HasPermission<SqlitePool> for User {
 }
 
 #[derive(Clone)]
-pub(crate) struct OAuthClients {
+pub struct OAuthClients {
     pub db: SqlitePool,
     pub http: reqwest::Client,
     pub github_client_id: String,
@@ -150,7 +150,7 @@ impl OAuthClients {
 }
 
 /// The subset of GitHub's `/user` response we persist locally.
-pub(crate) struct GithubProfile<'a> {
+pub struct GithubProfile<'a> {
     pub id: u64,
     pub login: &'a str,
     pub name: Option<&'a str>,
@@ -178,7 +178,7 @@ pub(crate) struct GithubProfile<'a> {
 /// so the link branch is best-effort. Linking is safe because the email on
 /// `GithubProfile` came from an authenticated GitHub session — i.e. the
 /// caller already controls that mailbox.
-pub(crate) async fn upsert_github_user(
+pub async fn upsert_github_user(
     db: &SqlitePool,
     profile: GithubProfile<'_>,
 ) -> anyhow::Result<i64> {
@@ -271,7 +271,7 @@ pub(crate) async fn upsert_github_user(
 
 /// Grant the baseline permissions every newly-created account starts with.
 /// Phase 3's `create_password_user` should also call this.
-pub(crate) async fn seed_default_permissions(
+pub async fn seed_default_permissions(
     db: &SqlitePool,
     user_id: i64,
 ) -> anyhow::Result<()> {
@@ -289,7 +289,7 @@ pub(crate) async fn seed_default_permissions(
 /// Returns the new user's id on success. The error is a user-facing message
 /// (server fn can surface it verbatim) — we deliberately avoid distinguishing
 /// "no such user" from "wrong password" anywhere to prevent enumeration.
-pub(crate) async fn create_password_user(
+pub async fn create_password_user(
     db: &SqlitePool,
     email: &str,
     password: &str,
@@ -341,7 +341,7 @@ pub(crate) async fn create_password_user(
 /// Returns `None` when no such account exists — the server fn deliberately
 /// surfaces the same "we sent it if the address was valid" response in both
 /// cases to avoid revealing which emails are registered.
-pub(crate) async fn request_password_reset(
+pub async fn request_password_reset(
     db: &SqlitePool,
     email: &str,
 ) -> anyhow::Result<Option<String>> {
@@ -386,7 +386,7 @@ pub(crate) async fn request_password_reset(
 /// Consume a reset token: validate, hash the new password, set it, and delete
 /// all outstanding tokens for the same user (so a leaked older token can't be
 /// re-used after a successful reset).
-pub(crate) async fn consume_password_reset(
+pub async fn consume_password_reset(
     db: &SqlitePool,
     token: &str,
     new_password: &str,
@@ -447,14 +447,14 @@ fn unix_now() -> i64 {
 /// email"; `Invalid` collapses the "no such account" and "wrong password"
 /// cases into one to avoid user enumeration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum VerifyOutcome {
+pub enum VerifyOutcome {
     Verified(i64),
     Unverified,
     Invalid,
 }
 
 /// Verify an email/password pair and the account's email-verified status.
-pub(crate) async fn verify_password_user(
+pub async fn verify_password_user(
     db: &SqlitePool,
     email: &str,
     password: &str,
@@ -494,7 +494,7 @@ pub(crate) async fn verify_password_user(
 }
 
 /// Issue a 24-hour email verification token for the given user.
-pub(crate) async fn issue_verification_token(
+pub async fn issue_verification_token(
     db: &SqlitePool,
     user_id: i64,
 ) -> anyhow::Result<String> {
@@ -526,7 +526,7 @@ pub(crate) async fn issue_verification_token(
 /// Consume an email verification token: mark the user verified, delete all
 /// outstanding tokens for them, and return the user id. Returns `None` when
 /// the token is unknown or expired.
-pub(crate) async fn consume_verification_token(
+pub async fn consume_verification_token(
     db: &SqlitePool,
     token: &str,
 ) -> anyhow::Result<Option<i64>> {
@@ -566,7 +566,7 @@ const RECOVERY_CODE_COUNT: usize = 10;
 /// type them if their scanner is broken), a data-URL-ready PNG QR code,
 /// and the freshly-minted plaintext recovery codes (shown ONCE — only the
 /// hashes hit the DB).
-pub(crate) struct MfaSetupInfo {
+pub struct MfaSetupInfo {
     pub secret_base32: String,
     pub qr_png_base64: String,
     pub recovery_codes: Vec<String>,
@@ -574,7 +574,7 @@ pub(crate) struct MfaSetupInfo {
 
 /// High-level status of MFA on a single account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MfaStatus {
+pub enum MfaStatus {
     /// No secret stored.
     Disabled,
     /// Secret stored but the user hasn't confirmed enrollment yet.
@@ -587,7 +587,7 @@ pub(crate) enum MfaStatus {
 /// persist the pending secret on the user (mfa_enabled_at stays NULL until
 /// they confirm a TOTP), and store Argon2 hashes of the recovery codes.
 /// Re-running on a still-pending or enabled account wipes the old data.
-pub(crate) async fn setup_mfa_secret(
+pub async fn setup_mfa_secret(
     db: &SqlitePool,
     user_id: i64,
     account_label: &str,
@@ -657,7 +657,7 @@ pub(crate) async fn setup_mfa_secret(
 
 /// Confirm enrollment by validating a current TOTP from the pending secret.
 /// Returns `true` when the code matched and `mfa_enabled_at` is now set.
-pub(crate) async fn enable_mfa(
+pub async fn enable_mfa(
     db: &SqlitePool,
     user_id: i64,
     totp_code: &str,
@@ -678,7 +678,7 @@ pub(crate) async fn enable_mfa(
 
 /// Login-time second-factor check. Accepts a 6-digit TOTP code or one of
 /// the user's unused recovery codes (marked used on success).
-pub(crate) async fn verify_mfa_challenge(
+pub async fn verify_mfa_challenge(
     db: &SqlitePool,
     user_id: i64,
     code: &str,
@@ -696,7 +696,7 @@ pub(crate) async fn verify_mfa_challenge(
 
 /// Fully turn off MFA: clear the secret, the enabled timestamp, and any
 /// recovery codes.
-pub(crate) async fn disable_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Result<()> {
+pub async fn disable_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Result<()> {
     let mut tx = db.begin().await?;
     sqlx::query("UPDATE users SET mfa_secret = NULL, mfa_enabled_at = NULL WHERE id = ?")
         .bind(user_id)
@@ -711,7 +711,7 @@ pub(crate) async fn disable_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Result
 }
 
 /// Returns true iff the user has fully completed enrollment.
-pub(crate) async fn user_has_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Result<bool> {
+pub async fn user_has_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Result<bool> {
     let row: Option<(Option<i64>,)> =
         sqlx::query_as("SELECT mfa_enabled_at FROM users WHERE id = ?")
             .bind(user_id)
@@ -721,7 +721,7 @@ pub(crate) async fn user_has_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Resul
 }
 
 /// Used by the /account/mfa page to decide which actions to render.
-pub(crate) async fn mfa_status(db: &SqlitePool, user_id: i64) -> anyhow::Result<MfaStatus> {
+pub async fn mfa_status(db: &SqlitePool, user_id: i64) -> anyhow::Result<MfaStatus> {
     let row: Option<(Option<String>, Option<i64>)> =
         sqlx::query_as("SELECT mfa_secret, mfa_enabled_at FROM users WHERE id = ?")
             .bind(user_id)
@@ -805,7 +805,7 @@ fn generate_recovery_code<R: argon2::password_hash::rand_core::RngCore>(rng: &mu
 
 /// Look up a still-unverified password account by email. Used by the
 /// "resend verification email" endpoint.
-pub(crate) async fn find_unverified_user_id(
+pub async fn find_unverified_user_id(
     db: &SqlitePool,
     email: &str,
 ) -> anyhow::Result<Option<i64>> {

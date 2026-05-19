@@ -1,205 +1,61 @@
-//! This example showcases how to use the `axum-session-auth` crate with Dioxus fullstack.
-//! We add the `auth::Session` extractor to our server functions to get access to the current user session.
+//! Example consumer of the `dx-auth` library.
 //!
-//! To initialize the axum router, we use `dioxus::serve` to spawn a custom axum server that creates
-//! our database, session store, and authentication layer.
-//!
-//! The `.serve_dioxus_application` method is used to mount our Dioxus app as a fallback service to
-//! handle HTML rendering and static assets.
-//!
-//! We easily share the "permissions" between the server and client by using a `HashSet<String>`
-//! which is serialized to/from JSON automatically by the server function system.
+//! All auth primitives — password / OAuth / MFA / email / sessions / rate
+//! limiting — live in the library. This binary only owns app-specific bits:
+//! the Home / ProfileCard / Forgot / Reset / Verify / MFA UI pages and the
+//! `get_permissions` server fn (which uses app-specific permission tokens).
 
 use std::collections::HashSet;
 
 use dioxus::prelude::*;
-use serde::{Deserialize, Serialize};
 
-mod components;
-use components::avatar::{Avatar, AvatarFallback, AvatarImage};
-use components::button::{Button, ButtonVariant};
-use components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
-use components::input::Input;
-use components::label::Label;
-use components::login_panel::{LoginPanel, LoginProvider, LoginSubmit, SubmitKind};
-
-#[cfg(feature = "server")]
-mod auth;
-
-#[cfg(feature = "server")]
-mod mail;
+use dx_auth::server::*;
+use dx_auth::ui::components::avatar::{Avatar, AvatarFallback, AvatarImage};
+use dx_auth::ui::components::button::{Button, ButtonVariant};
+use dx_auth::ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
+use dx_auth::ui::components::input::Input;
+use dx_auth::ui::components::label::Label;
+use dx_auth::ui::{LoginPanel, LoginProvider, LoginSubmit, SubmitKind};
+use dx_auth::{
+    friendly_server_error, LoginOutcome, MfaSetupView, MfaStatusView, ProviderId, UserProfile,
+};
 
 const THEME_CSS: Asset = asset!("/assets/dx-components-theme.css");
 const APP_CSS: Asset = asset!("/assets/app.css");
 
 const GITHUB_ICON_SVG: &str = r#"<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.4 3-.405 1.02.005 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>"#;
 
-/// Third-party identity providers the server knows how to handle. Each entry
-/// in `available_providers`'s return value gets mapped to a `LoginProvider` on
-/// the client.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProviderId {
-    Github,
-}
-
-/// Result of a sign-in or sign-up attempt.
-///
-/// `EmailUnverified` and `MfaRequired` are not errors: they're successful
-/// auth states that need an additional step before the user is fully signed
-/// in (open the verification email; submit a TOTP code).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LoginOutcome {
-    LoggedIn,
-    EmailUnverified,
-    MfaRequired,
-}
-
-/// Setup payload returned to the client when starting MFA enrollment.
-/// `recovery_codes` is the only time these appear in plaintext anywhere —
-/// the server only persists Argon2 hashes.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct MfaSetupView {
-    pub secret_base32: String,
-    pub qr_png_base64: String,
-    pub recovery_codes: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum MfaStatusView {
-    #[default]
-    Disabled,
-    /// Secret stored but the user hasn't confirmed enrollment with a TOTP yet.
-    Pending,
-    Enabled,
-}
-
-/// Profile fields safe to expose to the client.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct UserProfile {
-    pub is_authenticated: bool,
-    pub username: String,
-    pub name: Option<String>,
-    pub email: Option<String>,
-    pub avatar_url: Option<String>,
-    pub html_url: Option<String>,
-}
-
 fn main() {
-    // On the client, we simply launch the app as normal, taking over the main thread
     #[cfg(not(feature = "server"))]
     dioxus::launch(app);
 
-    // On the server, we can use `dioxus::serve` to create a server that serves our app.
-    //
-    // The `serve` function takes a closure that returns a `Future` which resolves to an `axum::Router`.
-    //
-    // We return a `Router` such that dioxus sets up logging, hot-reloading, devtools, and wires up the
-    // IP and PORT environment variables to our server.
     #[cfg(feature = "server")]
     dioxus::serve(|| async {
-        use crate::auth::*;
-        use axum_session::{SessionConfig, SessionLayer, SessionStore};
-        use axum_session_auth::AuthConfig;
-        use axum_session_sqlx::SessionSqlitePool;
         use sqlx::sqlite::SqlitePoolOptions;
 
-        // File-backed SQLite so accounts persist across restarts. Lives next to the
-        // binary's cwd — typically `auth/` during `dx serve`.
-        let db = SqlitePoolOptions::new()
+        let pool = SqlitePoolOptions::new()
             .max_connections(20)
             .connect_with("sqlite://./auth.db?mode=rwc".parse()?)
             .await?;
+        // The example's migrations dir contains both dx-auth's bundled SQL
+        // (copied from crates/dx-auth/migrations/sqlite/) and any
+        // app-specific ones (none yet).
+        sqlx::migrate!().run(&pool).await?;
 
-        // Apply embedded migrations (compiled from auth/migrations/*.sql).
-        sqlx::migrate!().run(&db).await?;
-
-        // Build third-party OAuth state (GitHub) from env vars. Returns None
-        // when credentials are unset — we skip the routes in that case and
-        // the UI hides the provider button via `available_providers` below.
-        let oauth_clients = OAuthClients::from_env(db.clone())?;
-        match &oauth_clients {
+        let github = dx_auth::auth::OAuthClients::from_env(pool.clone())?;
+        match &github {
             Some(_) => println!("[startup] GitHub OAuth: enabled"),
             None => println!(
                 "[startup] GitHub OAuth: disabled (set GITHUB_CLIENT_ID + GITHUB_CLIENT_SECRET to enable)"
             ),
         }
 
-        // Email infrastructure — SMTP if env vars are set, otherwise the dev
-        // file backend that writes .eml files to ./emails/.
-        let mailer = crate::mail::Mailer::from_env()?;
+        let mailer = dx_auth::Mailer::from_env()?;
         println!("[startup] mailer backend: {}", mailer.describe());
 
-        // Start from the base Dioxus router and merge in the OAuth subrouter
-        // only when credentials were configured.
-        let mut router = dioxus::server::router(app);
-        if let Some(clients) = oauth_clients {
-            let oauth_router = axum::Router::new()
-                .route("/auth/github/login", axum::routing::get(github_login))
-                .route("/auth/github/callback", axum::routing::get(github_callback))
-                .with_state(clients);
-            router = router.merge(oauth_router);
-        }
+        let cfg = dx_auth::AuthConfig::builder(pool, mailer).github(github).build();
 
-        // Per-IP rate limit on the whole app. Tuned so normal page loads
-        // (handful of server-fn calls + assets) breeze through, but
-        // sustained brute-force on /api/user/login-password slows hard:
-        // burst of 30 requests, then 1 req/sec replenishment per IP.
-        // Combined with Argon2 password verification (~100ms/attempt) this
-        // is plenty for an example app; a real deployment would also want
-        // path-aware tighter limits on the auth endpoints specifically.
-        //
-        // We use a custom key extractor: SmartIp checks X-Forwarded-For /
-        // X-Real-IP / Forwarded / ConnectInfo / socket. If none are present
-        // (e.g. `dx serve` doesn't always attach ConnectInfo locally) we
-        // fall back to a single shared bucket so the first visit doesn't
-        // 500 with "Unable To Extract Key!".
-        let governor_config = std::sync::Arc::new(
-            tower_governor::governor::GovernorConfigBuilder::default()
-                .key_extractor(LenientIpKeyExtractor)
-                .per_second(1)
-                .burst_size(30)
-                .finish()
-                .expect("valid governor config"),
-        );
-        // Periodically prune stale per-IP buckets so the in-memory table
-        // doesn't grow without bound.
-        {
-            let limiter = governor_config.limiter().clone();
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                    limiter.retain_recent();
-                }
-            });
-        }
-
-        Ok(router
-            .layer(tower_governor::GovernorLayer::new(governor_config))
-            // Make the SqlitePool reachable from server fns via `axum::Extension`.
-            .layer(axum::Extension(db.clone()))
-            .layer(axum::Extension(mailer.clone()))
-            .layer(
-                AuthLayer::new(Some(db.clone()))
-                    .with_config(AuthConfig::<i64>::default().with_anonymous_user_id(Some(1))),
-            )
-            .layer(SessionLayer::new(
-                SessionStore::<SessionSqlitePool>::new(
-                    Some(db.into()),
-                    SessionConfig::default()
-                        .with_table_name("test_table")
-                        // Don't bind the session to client IP+UA. On localhost the browser may
-                        // hit 127.0.0.1 on one request and ::1 on another, invalidating lookups.
-                        .with_ip_and_user_agent(false)
-                        // Short-term sessions expire 2h after the last activity; long-term
-                        // ("Remember me") sessions stretch to 30d via set_longterm(true).
-                        // Cookie max-age matches the long path so the browser keeps the
-                        // cookie around long enough for the server-side row to outlive it.
-                        .with_lifetime(chrono::Duration::hours(2))
-                        .with_max_lifetime(chrono::Duration::days(30))
-                        .with_max_age(Some(chrono::Duration::days(30))),
-                )
-                .await?,
-            )))
+        dx_auth::install(dioxus::server::router(app), cfg).await
     });
 }
 
@@ -222,11 +78,12 @@ fn app() -> Element {
         document::Stylesheet { href: THEME_CSS }
         document::Stylesheet { href: APP_CSS }
 
-        // Pre-mount the catalog widgets that only appear inside LoginPanel so
-        // their css_module assets are registered during the initial render.
-        // Without this, a logged-in user signing out triggers a client-side
-        // mount whose OnceLock + queue_effect link-insertion path can race
-        // against the paint and leave the form unstyled until refresh.
+        // Pre-mount the catalog widgets that only appear inside LoginPanel /
+        // MfaSetup so their css_module assets are registered during the
+        // initial render. Without this, a logged-in user signing out
+        // triggers a client-side mount whose OnceLock + queue_effect link-
+        // insertion path can race against the paint and leave the form
+        // unstyled until refresh.
         div { style: "display: none", aria_hidden: "true",
             Input {}
             Label { html_for: "__preload" }
@@ -242,8 +99,6 @@ fn Home() -> Element {
     let mut permissions = use_action(get_permissions);
     let mut logout = use_action(logout);
 
-    // Configured providers are server-controlled — env vars decide what's
-    // available, so the client just renders whatever the server reports.
     let providers_resource = use_resource(available_providers);
     let providers: Vec<LoginProvider> = providers_resource()
         .and_then(|r| r.ok())
@@ -252,9 +107,7 @@ fn Home() -> Element {
         .map(provider_descriptor)
         .collect();
 
-    let current: UserProfile = profile()
-        .and_then(|r| r.ok())
-        .unwrap_or_default();
+    let current: UserProfile = profile().and_then(|r| r.ok()).unwrap_or_default();
     let logged_in = current.is_authenticated;
 
     let mut auth_error = use_signal(String::new);
@@ -272,12 +125,8 @@ fn Home() -> Element {
             };
             match result {
                 Ok(LoginOutcome::LoggedIn) => profile.restart(),
-                Ok(LoginOutcome::EmailUnverified) => {
-                    pending_email.set(Some(email_for_pending));
-                }
-                Ok(LoginOutcome::MfaRequired) => {
-                    pending_mfa.set(true);
-                }
+                Ok(LoginOutcome::EmailUnverified) => pending_email.set(Some(email_for_pending)),
+                Ok(LoginOutcome::MfaRequired) => pending_mfa.set(true),
                 Err(e) => auth_error.set(friendly_server_error(e)),
             }
         });
@@ -287,7 +136,6 @@ fn Home() -> Element {
         main { class: "app-shell",
             if logged_in {
                 ProfileCard { profile: current }
-
                 div { class: "app-actions",
                     Button {
                         variant: ButtonVariant::Ghost,
@@ -306,12 +154,11 @@ fn Home() -> Element {
                         "Fetch permissions"
                     }
                 }
-
                 if let Some(Ok(perms)) = permissions.value().as_ref() {
                     pre { class: "app-debug", "Permissions: {perms:?}" }
                 }
             } else if pending_mfa() {
-                MfaChallenge {
+                MfaChallengeView {
                     on_logged_in: move |_| {
                         pending_mfa.set(false);
                         profile.restart();
@@ -349,6 +196,65 @@ fn Home() -> Element {
     }
 }
 
+fn provider_descriptor(id: ProviderId) -> LoginProvider {
+    match id {
+        ProviderId::Github => LoginProvider {
+            name: "GitHub",
+            href: "/auth/github/login",
+            icon_svg: Some(GITHUB_ICON_SVG),
+        },
+    }
+}
+
+#[component]
+fn ProfileCard(profile: UserProfile) -> Element {
+    let display_name = profile.name.clone().unwrap_or_else(|| profile.username.clone());
+    let handle = profile.username.clone();
+    let avatar_url = profile.avatar_url.clone();
+    let email = profile.email.clone();
+    let html_url = profile.html_url.clone();
+
+    rsx! {
+        Card { class: "profile-card",
+            CardHeader {
+                div { class: "profile-card-identity",
+                    Avatar {
+                        if let Some(url) = avatar_url.as_ref() {
+                            AvatarImage { src: "{url}", alt: "{display_name}" }
+                        }
+                        AvatarFallback { "{initials(&display_name)}" }
+                    }
+                    div { class: "profile-card-text",
+                        CardTitle { "{display_name}" }
+                        CardDescription { "@{handle}" }
+                    }
+                }
+            }
+            CardContent {
+                ul { class: "profile-card-meta",
+                    if let Some(addr) = email {
+                        li { "Email: {addr}" }
+                    }
+                    if let Some(url) = html_url {
+                        li {
+                            "Profile: "
+                            a { href: "{url}", target: "_blank", "{url}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn initials(name: &str) -> String {
+    name.split_whitespace()
+        .filter_map(|w| w.chars().next())
+        .take(2)
+        .collect::<String>()
+        .to_uppercase()
+}
+
 #[component]
 fn VerificationPending(email: String, on_back: EventHandler<()>) -> Element {
     let mut resending = use_signal(|| false);
@@ -370,7 +276,6 @@ fn VerificationPending(email: String, on_back: EventHandler<()>) -> Element {
                     if resent() {
                         p { class: "auth-success", "Sent another link." }
                     }
-
                     Button {
                         variant: ButtonVariant::Outline,
                         onclick: move |_| {
@@ -384,7 +289,6 @@ fn VerificationPending(email: String, on_back: EventHandler<()>) -> Element {
                         },
                         if resending() { "Sending…" } else { "Resend verification email" }
                     }
-
                     p { class: "auth-aux",
                         a {
                             href: "#",
@@ -402,7 +306,7 @@ fn VerificationPending(email: String, on_back: EventHandler<()>) -> Element {
 }
 
 #[component]
-fn MfaChallenge(on_logged_in: EventHandler<()>, on_cancel: EventHandler<()>) -> Element {
+fn MfaChallengeView(on_logged_in: EventHandler<()>, on_cancel: EventHandler<()>) -> Element {
     let mut code = use_signal(String::new);
     let mut use_recovery = use_signal(|| false);
     let mut error = use_signal(String::new);
@@ -426,9 +330,7 @@ fn MfaChallenge(on_logged_in: EventHandler<()>, on_cancel: EventHandler<()>) -> 
                     onsubmit: move |evt| {
                         evt.prevent_default();
                         let code_val = code.read().trim().to_string();
-                        if code_val.is_empty() {
-                            return;
-                        }
+                        if code_val.is_empty() { return; }
                         error.set(String::new());
                         submitting.set(true);
                         spawn(async move {
@@ -441,7 +343,6 @@ fn MfaChallenge(on_logged_in: EventHandler<()>, on_cancel: EventHandler<()>) -> 
                             submitting.set(false);
                         });
                     },
-
                     div { class: "auth-field",
                         Label {
                             html_for: "mfa-code",
@@ -458,18 +359,15 @@ fn MfaChallenge(on_logged_in: EventHandler<()>, on_cancel: EventHandler<()>) -> 
                             oninput: move |evt: FormEvent| code.set(evt.value()),
                         }
                     }
-
                     if !error().is_empty() {
                         div { class: "auth-error", role: "alert", "{error}" }
                     }
-
                     Button {
                         variant: ButtonVariant::Primary,
                         r#type: "submit",
                         class: "auth-submit",
                         if submitting() { "Verifying…" } else { "Verify" }
                     }
-
                     p { class: "auth-aux",
                         a {
                             href: "#",
@@ -508,9 +406,7 @@ fn MfaSetup() -> Element {
     let mut info_message = use_signal(String::new);
     let mut busy = use_signal(|| false);
 
-    let current = profile()
-        .and_then(|r| r.ok())
-        .unwrap_or_default();
+    let current = profile().and_then(|r| r.ok()).unwrap_or_default();
 
     if !current.is_authenticated {
         return rsx! {
@@ -526,9 +422,7 @@ fn MfaSetup() -> Element {
         };
     }
 
-    let status_value: MfaStatusView = status()
-        .and_then(|r| r.ok())
-        .unwrap_or_default();
+    let status_value: MfaStatusView = status().and_then(|r| r.ok()).unwrap_or_default();
 
     rsx! {
         main { class: "app-shell",
@@ -550,7 +444,6 @@ fn MfaSetup() -> Element {
                     if !error().is_empty() {
                         div { class: "auth-error", role: "alert", "{error}" }
                     }
-
                     match status_value {
                         MfaStatusView::Disabled => rsx! {
                             div { class: "auth-form",
@@ -676,7 +569,6 @@ fn MfaSetup() -> Element {
                             }
                         },
                     }
-
                     p { class: "auth-aux", a { href: "/", "Back to account" } }
                 }
             }
@@ -688,9 +580,7 @@ fn MfaSetup() -> Element {
 fn MfaSetupArtifacts(info: MfaSetupView) -> Element {
     rsx! {
         div { class: "mfa-artifacts",
-            p {
-                "Scan this QR code in your authenticator app, then enter a code below to confirm."
-            }
+            p { "Scan this QR code in your authenticator app, then enter a code below to confirm." }
             img {
                 class: "mfa-qr",
                 alt: "MFA QR code",
@@ -781,9 +671,7 @@ fn VerifyEmail(token: String) -> Element {
     rsx! {
         main { class: "app-shell",
             Card { class: "login-panel",
-                CardHeader {
-                    CardTitle { "Verify your email" }
-                }
+                CardHeader { CardTitle { "Verify your email" } }
                 CardContent { {body} }
             }
         }
@@ -808,18 +696,14 @@ fn ForgotPassword() -> Element {
                         p { class: "auth-success",
                             "If an account exists for that address, a reset link is on its way."
                         }
-                        p {
-                            a { href: "/", "Back to sign in" }
-                        }
+                        p { a { href: "/", "Back to sign in" } }
                     } else {
                         form {
                             class: "auth-form",
                             onsubmit: move |evt| {
                                 evt.prevent_default();
                                 let email_val = email.read().clone();
-                                if email_val.trim().is_empty() {
-                                    return;
-                                }
+                                if email_val.trim().is_empty() { return; }
                                 sending.set(true);
                                 spawn(async move {
                                     let _ = request_password_reset_email(email_val).await;
@@ -941,397 +825,15 @@ fn ResetPassword(token: String) -> Element {
     }
 }
 
-#[component]
-fn ProfileCard(profile: UserProfile) -> Element {
-    let display_name = profile.name.clone().unwrap_or_else(|| profile.username.clone());
-    let handle = profile.username.clone();
-    let avatar_url = profile.avatar_url.clone();
-    let email = profile.email.clone();
-    let html_url = profile.html_url.clone();
+// ---- App-specific server fn: which permissions the current user has. ----
 
-    rsx! {
-        Card { class: "profile-card",
-            CardHeader {
-                div { class: "profile-card-identity",
-                    Avatar {
-                        if let Some(url) = avatar_url.as_ref() {
-                            AvatarImage { src: "{url}", alt: "{display_name}" }
-                        }
-                        AvatarFallback { "{initials(&display_name)}" }
-                    }
-                    div { class: "profile-card-text",
-                        CardTitle { "{display_name}" }
-                        CardDescription { "@{handle}" }
-                    }
-                }
-            }
-            CardContent {
-                ul { class: "profile-card-meta",
-                    if let Some(addr) = email {
-                        li { "Email: {addr}" }
-                    }
-                    if let Some(url) = html_url {
-                        li {
-                            "Profile: "
-                            a { href: "{url}", target: "_blank", "{url}" }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Map a server-reported `ProviderId` to the static display info the
-/// `LoginPanel` needs (display name, login route, icon).
-fn provider_descriptor(id: ProviderId) -> LoginProvider {
-    match id {
-        ProviderId::Github => LoginProvider {
-            name: "GitHub",
-            href: "/auth/github/login",
-            icon_svg: Some(GITHUB_ICON_SVG),
-        },
-    }
-}
-
-/// Extract just the human-readable message from a server function error so the
-/// panel renders "Invalid email or password." instead of the verbose Display
-/// wrapper ("error running server function: <message> (details: ...)") that
-/// CapturedError reconstructs from the wire-transported string.
-fn friendly_server_error(e: dioxus::CapturedError) -> String {
-    let raw = e.to_string();
-    // Rate-limit responses come straight from tower_governor as plain
-    // `HTTP 429 Too Many Requests`; the server-fn client surfaces them via
-    // various wrappers, so match on either token.
-    if raw.contains("429") || raw.contains("Too Many Requests") {
-        return "Too many attempts. Wait a minute and try again.".to_string();
-    }
-    let rest = raw.strip_prefix("error running server function: ").unwrap_or(&raw);
-    let cleaned = rest.rsplit_once(" (details:").map(|(m, _)| m).unwrap_or(rest);
-    cleaned.to_string()
-}
-
-fn initials(name: &str) -> String {
-    name.split_whitespace()
-        .filter_map(|w| w.chars().next())
-        .take(2)
-        .collect::<String>()
-        .to_uppercase()
-}
-
-/// Log out the current session.
-#[post("/api/user/logout", auth: auth::Session)]
-pub async fn logout() -> Result<()> {
-    auth.logout_user();
-    Ok(())
-}
-
-/// Which third-party providers the server has credentials configured for.
-/// The UI uses this to decide which provider buttons to render.
-#[get("/api/auth/providers")]
-pub async fn available_providers() -> Result<Vec<ProviderId>> {
-    let mut providers = Vec::new();
-    let id_set = std::env::var("GITHUB_CLIENT_ID")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .is_some();
-    let secret_set = std::env::var("GITHUB_CLIENT_SECRET")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .is_some();
-    if id_set && secret_set {
-        providers.push(ProviderId::Github);
-    }
-    Ok(providers)
-}
-
-#[cfg(feature = "server")]
-type DbExtension = axum::Extension<sqlx::SqlitePool>;
-
-#[cfg(feature = "server")]
-type MailExtension = axum::Extension<crate::mail::Mailer>;
-
-#[cfg(feature = "server")]
-type SessionStore = axum_session::Session<axum_session_sqlx::SessionSqlitePool>;
-
-/// Session key under which we stash `(user_id, expires_at_unix)` between a
-/// successful password verification and the user submitting their TOTP code.
-#[cfg(feature = "server")]
-const MFA_PENDING_KEY: &str = "mfa_pending";
-/// How long the pending challenge survives in the session.
-#[cfg(feature = "server")]
-const MFA_PENDING_TTL_SECS: i64 = 5 * 60;
-
-/// Like `tower_governor::key_extractor::SmartIpKeyExtractor` but falls back
-/// to a fixed sentinel address when no IP source is available (e.g. local
-/// `dx serve` without `ConnectInfo`). Without this fallback the very first
-/// request 500s with "Unable To Extract Key!". In production behind a real
-/// proxy the smart path will fire and per-IP limits kick in normally.
-#[cfg(feature = "server")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct LenientIpKeyExtractor;
-
-#[cfg(feature = "server")]
-impl tower_governor::key_extractor::KeyExtractor for LenientIpKeyExtractor {
-    type Key = std::net::IpAddr;
-
-    fn extract<T>(
-        &self,
-        req: &http::Request<T>,
-    ) -> Result<Self::Key, tower_governor::GovernorError> {
-        use tower_governor::key_extractor::{KeyExtractor, SmartIpKeyExtractor};
-        let smart = SmartIpKeyExtractor;
-        Ok(smart.extract(req).unwrap_or(std::net::IpAddr::V4(
-            std::net::Ipv4Addr::UNSPECIFIED,
-        )))
-    }
-}
-
-#[cfg(feature = "server")]
-fn unix_now_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
-/// Kick off the password reset flow. Always returns Ok regardless of whether
-/// the email is registered, so the response can't be used to enumerate users.
-/// When the address is valid, an email with a reset link is sent via the
-/// configured Mailer backend (SMTP or the dev `./emails/*.eml` fallback).
-#[post("/api/user/request-password-reset", db: DbExtension, mail: MailExtension)]
-pub async fn request_password_reset_email(email: String) -> Result<()> {
-    if let Some(token) = auth::request_password_reset(&db.0, &email).await? {
-        let link = format!("{}/auth/reset?token={token}", mail.0.base_url());
-        let (subject, text, html) = crate::mail::templates::password_reset(&link);
-        if let Err(err) = mail.0.send(&email, &subject, &text, html.as_deref()).await {
-            eprintln!("[mail] WARN: failed to send password reset email: {err}");
-        }
-    }
-    Ok(())
-}
-
-/// Complete the password reset using the token from the email link.
-#[post("/api/user/reset-password", db: DbExtension)]
-pub async fn reset_password(token: String, new_password: String) -> Result<()> {
-    auth::consume_password_reset(&db.0, &token, &new_password).await?;
-    Ok(())
-}
-
-/// Create a new email/password account. Issues an email verification token
-/// and sends the link via the Mailer. The user is **not** logged in until
-/// they click the link.
-#[post("/api/user/register-password", db: DbExtension, mail: MailExtension)]
-pub async fn register_with_password(email: String, password: String) -> Result<LoginOutcome> {
-    let user_id = auth::create_password_user(&db.0, &email, &password).await?;
-    send_verification_email(&db.0, &mail.0, user_id, &email).await;
-    Ok(LoginOutcome::EmailUnverified)
-}
-
-/// Log in with an existing email/password account. `remember_me` upgrades the
-/// session to the long-term branch (~30 days) via `set_longterm(true)`; the
-/// default short branch expires after the configured `lifetime` (~2h).
-#[post("/api/user/login-password", auth: auth::Session, db: DbExtension, session: SessionStore)]
-pub async fn login_with_password(
-    email: String,
-    password: String,
-    remember_me: bool,
-) -> Result<LoginOutcome> {
-    match auth::verify_password_user(&db.0, &email, &password).await? {
-        auth::VerifyOutcome::Verified(user_id) => {
-            if auth::user_has_mfa(&db.0, user_id).await? {
-                // Stash the user id AND the remember-me preference so
-                // verify_login_mfa can honor it when finalizing.
-                let expires_at = unix_now_seconds() + MFA_PENDING_TTL_SECS;
-                session.set(MFA_PENDING_KEY, (user_id, expires_at, remember_me));
-                Ok(LoginOutcome::MfaRequired)
-            } else {
-                session.set_longterm(remember_me);
-                auth.login_user(user_id);
-                Ok(LoginOutcome::LoggedIn)
-            }
-        }
-        auth::VerifyOutcome::Unverified => Ok(LoginOutcome::EmailUnverified),
-        auth::VerifyOutcome::Invalid => {
-            Err(ServerFnError::new("Invalid email or password.").into())
-        }
-    }
-}
-
-/// Submit a TOTP (or recovery) code to finish the second-factor challenge
-/// kicked off by a successful password login. The `remember_me` preference
-/// captured at password-time is honored here.
-#[post("/api/user/verify-mfa", auth: auth::Session, db: DbExtension, session: SessionStore)]
-pub async fn verify_login_mfa(code: String) -> Result<LoginOutcome> {
-    let pending: Option<(i64, i64, bool)> = session.get(MFA_PENDING_KEY);
-    let Some((user_id, expires_at, remember_me)) = pending else {
-        return Err(ServerFnError::new(
-            "Your second-factor challenge expired. Please sign in again.",
-        )
-        .into());
-    };
-    if unix_now_seconds() > expires_at {
-        session.remove(MFA_PENDING_KEY);
-        return Err(ServerFnError::new(
-            "Your second-factor challenge expired. Please sign in again.",
-        )
-        .into());
-    }
-
-    if !auth::verify_mfa_challenge(&db.0, user_id, &code).await? {
-        return Err(ServerFnError::new("Code didn't match. Try again.").into());
-    }
-
-    session.remove(MFA_PENDING_KEY);
-    session.set_longterm(remember_me);
-    auth.login_user(user_id);
-    Ok(LoginOutcome::LoggedIn)
-}
-
-/// Cancel an in-flight MFA challenge so the user can restart sign-in.
-#[post("/api/user/cancel-mfa", session: SessionStore)]
-pub async fn cancel_mfa_challenge() -> Result<()> {
-    session.remove(MFA_PENDING_KEY);
-    Ok(())
-}
-
-/// Start MFA enrollment for the current user. Returns the secret + QR PNG +
-/// the freshly-generated recovery codes (the only time the codes appear in
-/// plaintext anywhere).
-#[post("/api/user/mfa/setup", auth: auth::Session, db: DbExtension)]
-pub async fn begin_mfa_setup() -> Result<MfaSetupView> {
-    let user = auth
-        .current_user
-        .as_ref()
-        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
-    if user.anonymous {
-        return Err(ServerFnError::new("Not signed in.").into());
-    }
-
-    let label = user
-        .email
-        .clone()
-        .unwrap_or_else(|| user.username.clone());
-
-    let info = auth::setup_mfa_secret(&db.0, user.id as i64, &label).await?;
-    Ok(MfaSetupView {
-        secret_base32: info.secret_base32,
-        qr_png_base64: info.qr_png_base64,
-        recovery_codes: info.recovery_codes,
-    })
-}
-
-/// Confirm enrollment by submitting a current TOTP code.
-#[post("/api/user/mfa/confirm", auth: auth::Session, db: DbExtension)]
-pub async fn confirm_mfa_setup(code: String) -> Result<()> {
-    let user = auth
-        .current_user
-        .as_ref()
-        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
-    if user.anonymous {
-        return Err(ServerFnError::new("Not signed in.").into());
-    }
-    if auth::enable_mfa(&db.0, user.id as i64, &code).await? {
-        Ok(())
-    } else {
-        Err(ServerFnError::new("That code didn't match. Try again.").into())
-    }
-}
-
-/// Turn off MFA for the current user. Wipes the secret and all recovery codes.
-#[post("/api/user/mfa/disable", auth: auth::Session, db: DbExtension)]
-pub async fn disable_mfa_for_user() -> Result<()> {
-    let user = auth
-        .current_user
-        .as_ref()
-        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
-    if user.anonymous {
-        return Err(ServerFnError::new("Not signed in.").into());
-    }
-    auth::disable_mfa(&db.0, user.id as i64).await?;
-    Ok(())
-}
-
-/// Look up MFA enrollment state so the `/account/mfa` page can decide what
-/// to render.
-#[get("/api/user/mfa/status", auth: auth::Session, db: DbExtension)]
-pub async fn get_mfa_status() -> Result<MfaStatusView> {
-    let user = auth
-        .current_user
-        .as_ref()
-        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
-    if user.anonymous {
-        return Ok(MfaStatusView::Disabled);
-    }
-    Ok(match auth::mfa_status(&db.0, user.id as i64).await? {
-        auth::MfaStatus::Disabled => MfaStatusView::Disabled,
-        auth::MfaStatus::Pending => MfaStatusView::Pending,
-        auth::MfaStatus::Enabled => MfaStatusView::Enabled,
-    })
-}
-
-/// Re-issue a verification email for an account that hasn't yet confirmed.
-/// Always returns Ok so the response can't be used to enumerate which
-/// addresses are registered and unverified.
-#[post("/api/user/resend-verification", db: DbExtension, mail: MailExtension)]
-pub async fn resend_verification_email(email: String) -> Result<()> {
-    if let Some(user_id) = auth::find_unverified_user_id(&db.0, &email).await? {
-        send_verification_email(&db.0, &mail.0, user_id, &email).await;
-    }
-    Ok(())
-}
-
-/// Consume an email-verification token from the link in the user's inbox.
-/// On success the account becomes verified and any subsequent sign-in is
-/// allowed; the user still needs to enter credentials on the home page.
-#[post("/api/user/verify-email", db: DbExtension)]
-pub async fn verify_email(token: String) -> Result<bool> {
-    Ok(auth::consume_verification_token(&db.0, &token).await?.is_some())
-}
-
-/// Shared helper: issue a token and send the verification email. Failures
-/// are logged but never bubble up to the caller — we don't want a flaky
-/// SMTP relay to fail the user-facing sign-up.
-#[cfg(feature = "server")]
-async fn send_verification_email(
-    db: &sqlx::SqlitePool,
-    mail: &crate::mail::Mailer,
-    user_id: i64,
-    to: &str,
-) {
-    match auth::issue_verification_token(db, user_id).await {
-        Ok(token) => {
-            let link = format!("{}/auth/verify?token={token}", mail.base_url());
-            let (subject, text, html) = crate::mail::templates::verify_email(&link);
-            if let Err(err) = mail.send(to, &subject, &text, html.as_deref()).await {
-                eprintln!("[mail] WARN: failed to send verification email: {err}");
-            }
-        }
-        Err(err) => eprintln!("[mail] WARN: failed to issue verification token: {err}"),
-    }
-}
-
-/// Returns the current user's public profile (including any third-party
-/// data we cached from the OAuth provider's user-info response).
-#[get("/api/user/profile", auth: auth::Session)]
-pub async fn get_current_user_profile() -> Result<UserProfile> {
-    let user = auth.current_user.unwrap();
-    Ok(UserProfile {
-        is_authenticated: !user.anonymous,
-        username: user.username,
-        name: user.name,
-        email: user.email,
-        avatar_url: user.avatar_url,
-        html_url: user.html_url,
-    })
-}
-
-/// Get the current user's permissions, guarding the endpoint with the `Auth` validator.
-/// If this returns false, we use the `or_unauthorized` extension to return a 401 error.
-#[get("/api/user/permissions", auth: auth::Session)]
+/// Demo permission check using the seed `Category::View` token the library's
+/// helpers grant new accounts. Real apps would seed via their own hook (a
+/// future API improvement) rather than depending on the library's default.
+#[get("/api/user/permissions", auth: dx_auth::auth::Session)]
 pub async fn get_permissions() -> Result<HashSet<String>> {
-    use crate::auth::User;
     use axum_session_auth::{Auth, Rights};
+    use dx_auth::auth::User;
 
     let user = auth.current_user.unwrap();
 
@@ -1345,147 +847,4 @@ pub async fn get_permissions() -> Result<HashSet<String>> {
         .or_unauthorized("You do not have permission to view categories")?;
 
     Ok(user.permissions)
-}
-
-#[cfg(feature = "server")]
-use crate::auth::OAuthClients;
-
-#[cfg(feature = "server")]
-#[derive(serde::Deserialize)]
-struct GithubCallbackParams {
-    code: String,
-    state: String,
-}
-
-#[cfg(feature = "server")]
-#[derive(serde::Deserialize)]
-struct GithubUserInfo {
-    id: u64,
-    login: String,
-    name: Option<String>,
-    email: Option<String>,
-    avatar_url: Option<String>,
-    html_url: Option<String>,
-}
-
-#[cfg(feature = "server")]
-fn github_basic_client(
-    clients: &OAuthClients,
-) -> anyhow::Result<
-    oauth2::basic::BasicClient<
-        oauth2::EndpointSet,
-        oauth2::EndpointNotSet,
-        oauth2::EndpointNotSet,
-        oauth2::EndpointNotSet,
-        oauth2::EndpointSet,
-    >,
-> {
-    use oauth2::basic::BasicClient;
-    use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
-
-    Ok(
-        BasicClient::new(ClientId::new(clients.github_client_id.clone()))
-            .set_client_secret(ClientSecret::new(clients.github_client_secret.clone()))
-            .set_auth_uri(AuthUrl::new(
-                "https://github.com/login/oauth/authorize".to_string(),
-            )?)
-            .set_token_uri(TokenUrl::new(
-                "https://github.com/login/oauth/access_token".to_string(),
-            )?)
-            .set_redirect_uri(RedirectUrl::new(clients.github_redirect_url.clone())?),
-    )
-}
-
-#[cfg(feature = "server")]
-fn http_err<E: std::fmt::Display>(status: axum::http::StatusCode, e: E) -> (axum::http::StatusCode, String) {
-    (status, e.to_string())
-}
-
-#[cfg(feature = "server")]
-async fn github_login(
-    axum::extract::State(clients): axum::extract::State<OAuthClients>,
-    session: axum_session::Session<axum_session_sqlx::SessionSqlitePool>,
-) -> Result<axum::response::Redirect, (axum::http::StatusCode, String)> {
-    use oauth2::{CsrfToken, Scope};
-
-    let client = github_basic_client(&clients)
-        .map_err(|e| http_err(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    let (auth_url, csrf_state) = client
-        .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new("read:user".to_string()))
-        .add_scope(Scope::new("user:email".to_string()))
-        .url();
-
-    session.set("gh_oauth_state", csrf_state.secret().to_string());
-
-    Ok(axum::response::Redirect::to(auth_url.as_ref()))
-}
-
-#[cfg(feature = "server")]
-async fn github_callback(
-    axum::extract::State(clients): axum::extract::State<OAuthClients>,
-    session: axum_session::Session<axum_session_sqlx::SessionSqlitePool>,
-    auth_session: auth::Session,
-    axum::extract::Query(params): axum::extract::Query<GithubCallbackParams>,
-) -> Result<axum::response::Redirect, (axum::http::StatusCode, String)> {
-    use oauth2::{AuthorizationCode, TokenResponse};
-
-    let expected_state: Option<String> = session.get("gh_oauth_state");
-    session.remove("gh_oauth_state");
-
-    let expected = expected_state.ok_or_else(|| {
-        http_err(
-            axum::http::StatusCode::BAD_REQUEST,
-            "missing oauth state in session",
-        )
-    })?;
-
-    if expected != params.state {
-        return Err(http_err(
-            axum::http::StatusCode::BAD_REQUEST,
-            "oauth state mismatch",
-        ));
-    }
-
-    let client = github_basic_client(&clients)
-        .map_err(|e| http_err(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    let token = client
-        .exchange_code(AuthorizationCode::new(params.code))
-        .request_async(&clients.http)
-        .await
-        .map_err(|e| http_err(axum::http::StatusCode::BAD_GATEWAY, format!("token exchange failed: {e}")))?;
-
-    let info: GithubUserInfo = clients
-        .http
-        .get("https://api.github.com/user")
-        .header("User-Agent", "dx-auth-example")
-        .header("Accept", "application/vnd.github+json")
-        .bearer_auth(token.access_token().secret())
-        .send()
-        .await
-        .map_err(|e| http_err(axum::http::StatusCode::BAD_GATEWAY, format!("github api request failed: {e}")))?
-        .error_for_status()
-        .map_err(|e| http_err(axum::http::StatusCode::BAD_GATEWAY, format!("github api status: {e}")))?
-        .json()
-        .await
-        .map_err(|e| http_err(axum::http::StatusCode::BAD_GATEWAY, format!("github api parse: {e}")))?;
-
-    let profile = auth::GithubProfile {
-        id: info.id,
-        login: &info.login,
-        name: info.name.as_deref(),
-        email: info.email.as_deref(),
-        avatar_url: info.avatar_url.as_deref(),
-        html_url: info.html_url.as_deref(),
-    };
-
-    let user_id = auth::upsert_github_user(&clients.db, profile)
-        .await
-        .map_err(|e| http_err(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    auth_session.login_user(user_id);
-
-    Ok(axum::response::Redirect::to("/"))
 }

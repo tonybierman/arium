@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-#[css_module("/src/components/card/style.css")]
+#[css_module("/src/ui/components/card/style.css")]
 struct Styles;
 
 #[component]

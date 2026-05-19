@@ -3,7 +3,7 @@ use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::avatar::{self, AvatarState};
 use dioxus_primitives::merge_attributes;
 
-#[css_module("/src/components/avatar/style.css")]
+#[css_module("/src/ui/components/avatar/style.css")]
 struct Styles;
 
 #[derive(Clone, Copy, PartialEq, Default)]
