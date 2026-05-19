@@ -39,6 +39,11 @@ pub fn AdminUserList(on_select: EventHandler<i64>) -> Element {
     let users = use_resource(use_reactive!(|page| async move {
         admin_list_users(100, page * 100).await
     }));
+    let roles = use_resource(|| async { admin_list_roles().await });
+    let role_names: std::collections::HashMap<i64, String> = roles()
+        .and_then(|r| r.ok())
+        .map(|list| list.into_iter().map(|r| (r.id, r.name)).collect())
+        .unwrap_or_default();
 
     let body = match users() {
         None => rsx! {
@@ -70,9 +75,13 @@ pub fn AdminUserList(on_select: EventHandler<i64>) -> Element {
                         count,
                         estimate_size: |_idx| 56,
                         class: Styles::data_virtual,
-                        render_item: move |idx: usize| {
-                            let user = rows_signal.read()[idx].clone();
-                            rsx! { AdminUserRow { user, on_select } }
+                        render_item: {
+                            let role_names = role_names.clone();
+                            move |idx: usize| {
+                                let user = rows_signal.read()[idx].clone();
+                                let role_names = role_names.clone();
+                                rsx! { AdminUserRow { user, role_names, on_select } }
+                            }
                         },
                     }
                 }
@@ -113,13 +122,26 @@ pub fn AdminUserList(on_select: EventHandler<i64>) -> Element {
 }
 
 #[component]
-fn AdminUserRow(user: AdminUserSummary, on_select: EventHandler<i64>) -> Element {
+fn AdminUserRow(
+    user: AdminUserSummary,
+    role_names: std::collections::HashMap<i64, String>,
+    on_select: EventHandler<i64>,
+) -> Element {
     let id = user.id;
     let display = user
         .display_name
         .clone()
         .unwrap_or_else(|| user.username.clone());
-    let role_names: Vec<&'static str> = user.role_ids.iter().map(|r| role_name(*r)).collect();
+    let role_labels: Vec<String> = user
+        .role_ids
+        .iter()
+        .map(|r| {
+            role_names
+                .get(r)
+                .cloned()
+                .unwrap_or_else(|| format!("role:{r}"))
+        })
+        .collect();
     let (status_label, status_variant) = if user.deleted {
         ("deleted", BadgeVariant::Destructive)
     } else if user.anonymous {
@@ -153,7 +175,7 @@ fn AdminUserRow(user: AdminUserSummary, on_select: EventHandler<i64>) -> Element
             }
             div { class: Styles::data_cell, "data-label": "Roles",
                 span { class: Styles::admin_row_roles,
-                    for name in role_names.iter() {
+                    for name in role_labels.iter() {
                         Badge { key: "{name}", variant: BadgeVariant::Secondary, "{name}" }
                     }
                 }
@@ -167,15 +189,6 @@ fn AdminUserRow(user: AdminUserSummary, on_select: EventHandler<i64>) -> Element
                 }
             }
         }
-    }
-}
-
-fn role_name(id: i64) -> &'static str {
-    match id {
-        1 => "admin",
-        2 => "member",
-        3 => "guest",
-        _ => "custom",
     }
 }
 

@@ -283,6 +283,148 @@ pub async fn list_roles(db: &Pool) -> anyhow::Result<Vec<RoleRow>> {
     Ok(rows)
 }
 
+/// Create a new (non-system) role with the supplied permission tokens.
+/// Single transaction. Returns the new role id.
+pub async fn create_role(
+    db: &Pool,
+    name: &str,
+    description: Option<&str>,
+    permissions: &[String],
+) -> anyhow::Result<i64> {
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("Role name is required.");
+    }
+
+    let mut tx = db.begin().await?;
+    let inserted: Result<(i64,), sqlx::Error> = sqlx::query_as(
+        "INSERT INTO roles (name, description, is_system) VALUES ($1, $2, false) RETURNING id",
+    )
+    .bind(name)
+    .bind(description)
+    .fetch_one(&mut *tx)
+    .await;
+
+    let (role_id,) = match inserted {
+        Ok(row) => row,
+        Err(sqlx::Error::Database(dberr)) if dberr.is_unique_violation() => {
+            anyhow::bail!("A role with that name already exists.");
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    for token in dedup_tokens(permissions) {
+        sqlx::query("INSERT INTO role_permissions (role_id, token) VALUES ($1, $2)")
+            .bind(role_id)
+            .bind(token)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(role_id)
+}
+
+/// Replace a non-system role's metadata + permission token set.
+/// System roles (`is_system = true`) are read-only — calls against them
+/// fail with a user-facing error.
+pub async fn update_role(
+    db: &Pool,
+    role_id: i64,
+    name: &str,
+    description: Option<&str>,
+    permissions: &[String],
+) -> anyhow::Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("Role name is required.");
+    }
+
+    let mut tx = db.begin().await?;
+    let row: Option<(bool,)> = sqlx::query_as("SELECT is_system FROM roles WHERE id = $1")
+        .bind(role_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    match row {
+        None => anyhow::bail!("Role not found."),
+        Some((true,)) => anyhow::bail!("System roles are read-only."),
+        _ => {}
+    }
+
+    match sqlx::query("UPDATE roles SET name = $1, description = $2 WHERE id = $3")
+        .bind(name)
+        .bind(description)
+        .bind(role_id)
+        .execute(&mut *tx)
+        .await
+    {
+        Ok(_) => {}
+        Err(sqlx::Error::Database(dberr)) if dberr.is_unique_violation() => {
+            anyhow::bail!("A role with that name already exists.");
+        }
+        Err(e) => return Err(e.into()),
+    }
+
+    sqlx::query("DELETE FROM role_permissions WHERE role_id = $1")
+        .bind(role_id)
+        .execute(&mut *tx)
+        .await?;
+    for token in dedup_tokens(permissions) {
+        sqlx::query("INSERT INTO role_permissions (role_id, token) VALUES ($1, $2)")
+            .bind(role_id)
+            .bind(token)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Delete a non-system role. Clears `user_roles` rows referencing it so
+/// behavior is identical across sqlite and postgres regardless of FK
+/// cascade settings.
+pub async fn delete_role(db: &Pool, role_id: i64) -> anyhow::Result<()> {
+    let mut tx = db.begin().await?;
+    let row: Option<(bool,)> = sqlx::query_as("SELECT is_system FROM roles WHERE id = $1")
+        .bind(role_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    match row {
+        None => anyhow::bail!("Role not found."),
+        Some((true,)) => anyhow::bail!("System roles are read-only."),
+        _ => {}
+    }
+
+    sqlx::query("DELETE FROM user_roles WHERE role_id = $1")
+        .bind(role_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM role_permissions WHERE role_id = $1")
+        .bind(role_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM roles WHERE id = $1")
+        .bind(role_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+fn dedup_tokens(tokens: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::with_capacity(tokens.len());
+    for t in tokens {
+        let trimmed = t.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if seen.insert(trimmed.to_string()) {
+            out.push(trimmed.to_string());
+        }
+    }
+    out
+}
+
 /// Role ids attached to the given user.
 pub async fn get_user_role_ids(db: &Pool, user_id: i64) -> anyhow::Result<Vec<i64>> {
     let rows: Vec<(i64,)> =
@@ -1081,6 +1223,9 @@ pub mod audit {
 
     pub const ADMIN_ROLES_CHANGED: &str = "admin.user.roles_changed";
     pub const ADMIN_USER_DELETED:  &str = "admin.user.soft_deleted";
+    pub const ADMIN_ROLE_CREATED:  &str = "admin.role.created";
+    pub const ADMIN_ROLE_UPDATED:  &str = "admin.role.updated";
+    pub const ADMIN_ROLE_DELETED:  &str = "admin.role.deleted";
 
     /// All fields are optional — pass `None` for whatever you don't have.
     /// `details` should be a small JSON document (or `None`).

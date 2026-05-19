@@ -30,13 +30,14 @@ const APP_CSS: Asset = asset!("/assets/app.css");
 /// inside `AdminPage` hard-code the strings independently.
 const TOKEN_ADMIN_USERS: &str = "admin:users:read";
 const TOKEN_ADMIN_AUDIT: &str = "admin:audit:read";
+const TOKEN_ADMIN_ROLES: &str = "admin:roles:read";
 
 /// Admission policy for `/admin`. Anyone with at least one admin-tab
 /// token is admitted; individual tabs further filter by their specific
 /// token. Adding a new admin tab is a one-place edit: add a const above,
 /// reference it here and in `AdminPage`.
 fn admin_policy() -> Policy {
-    Policy::any_of([TOKEN_ADMIN_USERS, TOKEN_ADMIN_AUDIT])
+    Policy::any_of([TOKEN_ADMIN_USERS, TOKEN_ADMIN_AUDIT, TOKEN_ADMIN_ROLES])
 }
 
 fn main() {
@@ -899,10 +900,20 @@ fn AdminPage() -> Element {
     let perms = use_permissions();
     let can_users = perms.has(TOKEN_ADMIN_USERS);
     let can_audit = perms.has(TOKEN_ADMIN_AUDIT);
+    let can_roles = perms.has(TOKEN_ADMIN_ROLES);
 
     let mut selected = use_signal::<Option<i64>>(|| None);
+    // Role pane state: None = list, Some(None) = new, Some(Some(id)) = edit.
+    let mut role_pane = use_signal::<Option<Option<i64>>>(|| None);
 
-    let default_tab = if can_users { "users" } else { "audit" }.to_string();
+    let default_tab = if can_users {
+        "users"
+    } else if can_audit {
+        "audit"
+    } else {
+        "roles"
+    }
+    .to_string();
 
     rsx! {
         RequirePermission {
@@ -917,6 +928,9 @@ fn AdminPage() -> Element {
                         }
                         if can_audit {
                             TabTrigger { index: 1_usize, value: "audit".to_string(), "Audit log" }
+                        }
+                        if can_roles {
+                            TabTrigger { index: 2_usize, value: "roles".to_string(), "Roles" }
                         }
                     }
                     if can_users {
@@ -936,6 +950,24 @@ fn AdminPage() -> Element {
                     if can_audit {
                         TabContent { index: 1_usize, value: "audit".to_string(),
                             dx_auth::ui::AuditLog {}
+                        }
+                    }
+                    if can_roles {
+                        TabContent { index: 2_usize, value: "roles".to_string(),
+                            match role_pane() {
+                                Some(rid_opt) => rsx! {
+                                    dx_auth::ui::AdminRoleEditor {
+                                        role_id: rid_opt,
+                                        on_back: move |_| role_pane.set(None),
+                                    }
+                                },
+                                None => rsx! {
+                                    dx_auth::ui::AdminRoleList {
+                                        on_select: move |id: i64| role_pane.set(Some(Some(id))),
+                                        on_new: move |_| role_pane.set(Some(None)),
+                                    }
+                                },
+                            }
                         }
                     }
                 }

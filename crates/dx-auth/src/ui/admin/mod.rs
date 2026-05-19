@@ -9,5 +9,7 @@
 
 mod admin_screens;
 mod audit_log;
+mod role_screens;
 pub use admin_screens::{AdminUserDetail, AdminUserList};
 pub use audit_log::AuditLog;
+pub use role_screens::{AdminRoleEditor, AdminRoleList};

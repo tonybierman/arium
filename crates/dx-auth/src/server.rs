@@ -742,6 +742,100 @@ pub async fn admin_list_roles() -> Result<Vec<AdminRoleDetail>> {
     Ok(out)
 }
 
+/// Create a new (non-system) role.
+#[post("/api/admin/roles/create", auth: auth::Session, db: DbExtension, audit: AuditCtx)]
+pub async fn admin_create_role(
+    name: String,
+    description: Option<String>,
+    permissions: Vec<String>,
+) -> Result<i64> {
+    let actor_id = require_admin_perm(&auth, &db.0, "admin:roles:write").await?;
+    let role_id =
+        auth::create_role(&db.0, &name, description.as_deref(), &permissions).await?;
+    let details = format!(
+        "{{\"name\":{},\"permissions\":{:?}}}",
+        json_str(&name),
+        permissions
+    );
+    audit
+        .record(
+            &db.0,
+            auth::audit::ADMIN_ROLE_CREATED,
+            Some(actor_id),
+            Some(role_id),
+            Some(&details),
+        )
+        .await;
+    Ok(role_id)
+}
+
+/// Update a non-system role's metadata + permission token set.
+#[post("/api/admin/roles/update", auth: auth::Session, db: DbExtension, audit: AuditCtx)]
+pub async fn admin_update_role(
+    role_id: i64,
+    name: String,
+    description: Option<String>,
+    permissions: Vec<String>,
+) -> Result<()> {
+    let actor_id = require_admin_perm(&auth, &db.0, "admin:roles:write").await?;
+    let before_tokens = auth::list_permissions_for_role(&db.0, role_id)
+        .await
+        .unwrap_or_default();
+    auth::update_role(&db.0, role_id, &name, description.as_deref(), &permissions).await?;
+    let details = format!(
+        "{{\"name\":{},\"before\":{:?},\"after\":{:?}}}",
+        json_str(&name),
+        before_tokens,
+        permissions
+    );
+    audit
+        .record(
+            &db.0,
+            auth::audit::ADMIN_ROLE_UPDATED,
+            Some(actor_id),
+            Some(role_id),
+            Some(&details),
+        )
+        .await;
+    Ok(())
+}
+
+/// Delete a non-system role.
+#[post("/api/admin/roles/delete", auth: auth::Session, db: DbExtension, audit: AuditCtx)]
+pub async fn admin_delete_role(role_id: i64) -> Result<()> {
+    let actor_id = require_admin_perm(&auth, &db.0, "admin:roles:write").await?;
+    auth::delete_role(&db.0, role_id).await?;
+    audit
+        .record(
+            &db.0,
+            auth::audit::ADMIN_ROLE_DELETED,
+            Some(actor_id),
+            Some(role_id),
+            None,
+        )
+        .await;
+    Ok(())
+}
+
+#[cfg(feature = "server")]
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 // ============================================================
 // Account self-service (Phase 11c)
 // ============================================================
