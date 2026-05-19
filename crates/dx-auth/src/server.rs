@@ -13,13 +13,13 @@ use crate::wire::{LoginOutcome, MfaSetupView, MfaStatusView, ProviderId, UserPro
 use crate::auth;
 
 #[cfg(feature = "server")]
-pub(crate) type DbExtension = axum::Extension<sqlx::SqlitePool>;
+pub(crate) type DbExtension = axum::Extension<crate::pool::Pool>;
 
 #[cfg(feature = "server")]
 pub(crate) type MailExtension = axum::Extension<crate::mail::Mailer>;
 
 #[cfg(feature = "server")]
-pub(crate) type SessionStore = axum_session::Session<axum_session_sqlx::SessionSqlitePool>;
+pub(crate) type SessionStore = axum_session::Session<crate::pool::SessionPool>;
 
 /// Session key under which we stash `(user_id, expires_at_unix, remember_me)`
 /// between a successful password verification and the user submitting their
@@ -180,7 +180,7 @@ pub async fn verify_email(token: String) -> Result<bool> {
 /// relay to fail the user-facing sign-up.
 #[cfg(feature = "server")]
 async fn send_verification_email(
-    db: &sqlx::SqlitePool,
+    db: &crate::pool::Pool,
     mail: &crate::mail::Mailer,
     user_id: i64,
     to: &str,

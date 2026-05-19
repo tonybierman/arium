@@ -10,7 +10,7 @@
 use axum::Router;
 use axum_session::{SessionConfig, SessionLayer, SessionStore};
 use axum_session_auth::AuthConfig as AxumAuthConfig;
-use axum_session_sqlx::SessionSqlitePool;
+use crate::pool::SessionPool;
 
 use crate::auth::AuthLayer;
 use crate::config::AuthConfig;
@@ -25,7 +25,7 @@ use crate::server::{github_callback, github_login};
 /// 2. Layers a per-IP rate limiter (when configured) using a key extractor
 ///    that gracefully falls back to a fixed sentinel address if no IP source
 ///    is available (so the first request under `dx serve` doesn't 500).
-/// 3. Adds `axum::Extension`s for the [`SqlitePool`](sqlx::SqlitePool) and
+/// 3. Adds `axum::Extension`s for the [`Pool`](crate::pool::Pool) and
 ///    [`Mailer`](crate::Mailer) so server fns can reach them.
 /// 4. Adds the `axum_session_auth::AuthSessionLayer` with the anonymous Guest
 ///    user (`id = 1`).
@@ -76,7 +76,7 @@ pub async fn install(router: Router, cfg: AuthConfig) -> anyhow::Result<Router> 
     );
 
     // 5) Session layer.
-    let session_store = SessionStore::<SessionSqlitePool>::new(
+    let session_store = SessionStore::<SessionPool>::new(
         Some(cfg.pool.into()),
         SessionConfig::default()
             .with_table_name(cfg.session_table_name)

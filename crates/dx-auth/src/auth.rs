@@ -3,14 +3,14 @@
 
 use async_trait::async_trait;
 use axum_session_auth::*;
-use axum_session_sqlx::SessionSqlitePool;
+use crate::pool::SessionPool;
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqlitePool;
+use crate::pool::Pool;
 use std::collections::HashSet;
 
-pub type Session = axum_session_auth::AuthSession<User, i64, SessionSqlitePool, SqlitePool>;
+pub type Session = axum_session_auth::AuthSession<User, i64, SessionPool, Pool>;
 pub type AuthLayer =
-    axum_session_auth::AuthSessionLayer<User, i64, SessionSqlitePool, SqlitePool>;
+    axum_session_auth::AuthSessionLayer<User, i64, SessionPool, Pool>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
@@ -30,8 +30,8 @@ pub struct SqlPermissionTokens {
 }
 
 #[async_trait]
-impl Authentication<User, i64, SqlitePool> for User {
-    async fn load_user(userid: i64, pool: Option<&SqlitePool>) -> Result<User, anyhow::Error> {
+impl Authentication<User, i64, Pool> for User {
+    async fn load_user(userid: i64, pool: Option<&Pool>) -> Result<User, anyhow::Error> {
         let db = pool.unwrap();
 
         #[derive(sqlx::FromRow, Clone)]
@@ -88,15 +88,15 @@ impl Authentication<User, i64, SqlitePool> for User {
 }
 
 #[async_trait]
-impl HasPermission<SqlitePool> for User {
-    async fn has(&self, perm: &str, _pool: &Option<&SqlitePool>) -> bool {
+impl HasPermission<Pool> for User {
+    async fn has(&self, perm: &str, _pool: &Option<&Pool>) -> bool {
         self.permissions.contains(perm)
     }
 }
 
 #[derive(Clone)]
 pub struct OAuthClients {
-    pub db: SqlitePool,
+    pub db: Pool,
     pub http: reqwest::Client,
     pub github_client_id: String,
     pub github_client_secret: String,
@@ -112,7 +112,7 @@ impl OAuthClients {
     /// registering the OAuth routes and the UI should hide the provider
     /// button. Errors are reserved for genuine misconfiguration (e.g. failure
     /// to build the HTTP client).
-    pub fn from_env(db: SqlitePool) -> anyhow::Result<Option<Self>> {
+    pub fn from_env(db: Pool) -> anyhow::Result<Option<Self>> {
         let id = std::env::var("GITHUB_CLIENT_ID").ok().filter(|s| !s.is_empty());
         let secret = std::env::var("GITHUB_CLIENT_SECRET")
             .ok()
@@ -179,14 +179,14 @@ pub struct GithubProfile<'a> {
 /// `GithubProfile` came from an authenticated GitHub session — i.e. the
 /// caller already controls that mailbox.
 pub async fn upsert_github_user(
-    db: &SqlitePool,
+    db: &Pool,
     profile: GithubProfile<'_>,
 ) -> anyhow::Result<i64> {
     let github_id_str = profile.id.to_string();
 
     // 1) Already linked → refresh + return.
     let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT user_id FROM oauth_accounts WHERE provider = 'github' AND provider_user_id = ?",
+        "SELECT user_id FROM oauth_accounts WHERE provider = 'github' AND provider_user_id = $1",
     )
     .bind(&github_id_str)
     .fetch_optional(db)
@@ -194,8 +194,8 @@ pub async fn upsert_github_user(
 
     if let Some((user_id,)) = existing {
         sqlx::query(
-            "UPDATE users SET username = ?, name = ?, email = ?, avatar_url = ?, html_url = ? \
-             WHERE id = ?",
+            "UPDATE users SET username = $1, name = $2, email = $3, avatar_url = $4, html_url = $5 \
+             WHERE id = $6",
         )
         .bind(profile.login)
         .bind(profile.name)
@@ -211,7 +211,7 @@ pub async fn upsert_github_user(
     // 2) Email matches an existing local account → link rather than duplicate.
     if let Some(email) = profile.email {
         let matched: Option<(i64,)> = sqlx::query_as(
-            "SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1",
+            "SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1",
         )
         .bind(email)
         .fetch_optional(db)
@@ -220,7 +220,7 @@ pub async fn upsert_github_user(
         if let Some((user_id,)) = matched {
             sqlx::query(
                 "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) \
-                 VALUES ('github', ?, ?)",
+                 VALUES ('github', $1, $2)",
             )
             .bind(&github_id_str)
             .bind(user_id)
@@ -228,7 +228,7 @@ pub async fn upsert_github_user(
             .await?;
 
             sqlx::query(
-                "UPDATE users SET name = ?, avatar_url = ?, html_url = ? WHERE id = ?",
+                "UPDATE users SET name = $1, avatar_url = $2, html_url = $3 WHERE id = $4",
             )
             .bind(profile.name)
             .bind(profile.avatar_url)
@@ -245,7 +245,7 @@ pub async fn upsert_github_user(
     //    `email_verified_at` now to skip the verification email flow.
     let (user_id,): (i64,) = sqlx::query_as(
         "INSERT INTO users (anonymous, username, name, email, avatar_url, html_url, email_verified_at) \
-         VALUES (false, ?, ?, ?, ?, ?, ?) RETURNING id",
+         VALUES (false, $1, $2, $3, $4, $5, $6) RETURNING id",
     )
     .bind(profile.login)
     .bind(profile.name)
@@ -257,7 +257,7 @@ pub async fn upsert_github_user(
     .await?;
 
     sqlx::query(
-        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) VALUES ('github', ?, ?)",
+        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) VALUES ('github', $1, $2)",
     )
     .bind(&github_id_str)
     .bind(user_id)
@@ -272,11 +272,12 @@ pub async fn upsert_github_user(
 /// Grant the baseline permissions every newly-created account starts with.
 /// Phase 3's `create_password_user` should also call this.
 pub async fn seed_default_permissions(
-    db: &SqlitePool,
+    db: &Pool,
     user_id: i64,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT OR IGNORE INTO user_permissions (user_id, token) VALUES (?, 'Category::View')",
+        "INSERT INTO user_permissions (user_id, token) VALUES ($1, 'Category::View') \
+         ON CONFLICT DO NOTHING",
     )
     .bind(user_id)
     .execute(db)
@@ -290,7 +291,7 @@ pub async fn seed_default_permissions(
 /// (server fn can surface it verbatim) — we deliberately avoid distinguishing
 /// "no such user" from "wrong password" anywhere to prevent enumeration.
 pub async fn create_password_user(
-    db: &SqlitePool,
+    db: &Pool,
     email: &str,
     password: &str,
 ) -> anyhow::Result<i64> {
@@ -315,7 +316,7 @@ pub async fn create_password_user(
 
     let inserted: Result<(i64,), sqlx::Error> = sqlx::query_as(
         "INSERT INTO users (anonymous, username, email, password_hash) \
-         VALUES (false, ?, ?, ?) RETURNING id",
+         VALUES (false, $1, $2, $3) RETURNING id",
     )
     .bind(username)
     .bind(email)
@@ -342,14 +343,14 @@ pub async fn create_password_user(
 /// surfaces the same "we sent it if the address was valid" response in both
 /// cases to avoid revealing which emails are registered.
 pub async fn request_password_reset(
-    db: &SqlitePool,
+    db: &Pool,
     email: &str,
 ) -> anyhow::Result<Option<String>> {
     use argon2::password_hash::rand_core::{OsRng, RngCore};
 
     let user: Option<(i64,)> = sqlx::query_as(
         "SELECT id FROM users \
-         WHERE LOWER(email) = LOWER(?) AND password_hash IS NOT NULL \
+         WHERE LOWER(email) = LOWER($1) AND password_hash IS NOT NULL \
          LIMIT 1",
     )
     .bind(email.trim())
@@ -372,7 +373,7 @@ pub async fn request_password_reset(
     let expires_at = unix_now() + 3600;
 
     sqlx::query(
-        "INSERT INTO password_reset_tokens (token, user_id, expires_at) VALUES (?, ?, ?)",
+        "INSERT INTO password_reset_tokens (token, user_id, expires_at) VALUES ($1, $2, $3)",
     )
     .bind(&token)
     .bind(user_id)
@@ -387,7 +388,7 @@ pub async fn request_password_reset(
 /// all outstanding tokens for the same user (so a leaked older token can't be
 /// re-used after a successful reset).
 pub async fn consume_password_reset(
-    db: &SqlitePool,
+    db: &Pool,
     token: &str,
     new_password: &str,
 ) -> anyhow::Result<()> {
@@ -396,7 +397,7 @@ pub async fn consume_password_reset(
     }
 
     let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT user_id FROM password_reset_tokens WHERE token = ? AND expires_at > ? LIMIT 1",
+        "SELECT user_id FROM password_reset_tokens WHERE token = $1 AND expires_at > $2 LIMIT 1",
     )
     .bind(token)
     .bind(unix_now())
@@ -410,12 +411,12 @@ pub async fn consume_password_reset(
     let hash = hash_password(new_password)?;
 
     let mut tx = db.begin().await?;
-    sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
         .bind(&hash)
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM password_reset_tokens WHERE user_id = ?")
+    sqlx::query("DELETE FROM password_reset_tokens WHERE user_id = $1")
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
@@ -455,7 +456,7 @@ pub enum VerifyOutcome {
 
 /// Verify an email/password pair and the account's email-verified status.
 pub async fn verify_password_user(
-    db: &SqlitePool,
+    db: &Pool,
     email: &str,
     password: &str,
 ) -> anyhow::Result<VerifyOutcome> {
@@ -464,7 +465,7 @@ pub async fn verify_password_user(
 
     let row: Option<(i64, String, Option<i64>)> = sqlx::query_as(
         "SELECT id, password_hash, email_verified_at FROM users \
-         WHERE LOWER(email) = LOWER(?) AND password_hash IS NOT NULL \
+         WHERE LOWER(email) = LOWER($1) AND password_hash IS NOT NULL \
          LIMIT 1",
     )
     .bind(email.trim())
@@ -495,7 +496,7 @@ pub async fn verify_password_user(
 
 /// Issue a 24-hour email verification token for the given user.
 pub async fn issue_verification_token(
-    db: &SqlitePool,
+    db: &Pool,
     user_id: i64,
 ) -> anyhow::Result<String> {
     use argon2::password_hash::rand_core::{OsRng, RngCore};
@@ -512,7 +513,7 @@ pub async fn issue_verification_token(
     let expires_at = unix_now() + 24 * 3600;
 
     sqlx::query(
-        "INSERT INTO email_verification_tokens (token, user_id, expires_at) VALUES (?, ?, ?)",
+        "INSERT INTO email_verification_tokens (token, user_id, expires_at) VALUES ($1, $2, $3)",
     )
     .bind(&token)
     .bind(user_id)
@@ -527,11 +528,11 @@ pub async fn issue_verification_token(
 /// outstanding tokens for them, and return the user id. Returns `None` when
 /// the token is unknown or expired.
 pub async fn consume_verification_token(
-    db: &SqlitePool,
+    db: &Pool,
     token: &str,
 ) -> anyhow::Result<Option<i64>> {
     let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT user_id FROM email_verification_tokens WHERE token = ? AND expires_at > ? LIMIT 1",
+        "SELECT user_id FROM email_verification_tokens WHERE token = $1 AND expires_at > $2 LIMIT 1",
     )
     .bind(token)
     .bind(unix_now())
@@ -543,12 +544,12 @@ pub async fn consume_verification_token(
     };
 
     let mut tx = db.begin().await?;
-    sqlx::query("UPDATE users SET email_verified_at = ? WHERE id = ?")
+    sqlx::query("UPDATE users SET email_verified_at = $1 WHERE id = $2")
         .bind(unix_now())
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM email_verification_tokens WHERE user_id = ?")
+    sqlx::query("DELETE FROM email_verification_tokens WHERE user_id = $1")
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
@@ -588,7 +589,7 @@ pub enum MfaStatus {
 /// they confirm a TOTP), and store Argon2 hashes of the recovery codes.
 /// Re-running on a still-pending or enabled account wipes the old data.
 pub async fn setup_mfa_secret(
-    db: &SqlitePool,
+    db: &Pool,
     user_id: i64,
     account_label: &str,
 ) -> anyhow::Result<MfaSetupInfo> {
@@ -630,17 +631,17 @@ pub async fn setup_mfa_secret(
     }
 
     let mut tx = db.begin().await?;
-    sqlx::query("UPDATE users SET mfa_secret = ?, mfa_enabled_at = NULL WHERE id = ?")
+    sqlx::query("UPDATE users SET mfa_secret = $1, mfa_enabled_at = NULL WHERE id = $2")
         .bind(&secret_base32)
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM mfa_recovery_codes WHERE user_id = ?")
+    sqlx::query("DELETE FROM mfa_recovery_codes WHERE user_id = $1")
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
     for hash in &recovery_hashes {
-        sqlx::query("INSERT INTO mfa_recovery_codes (user_id, code_hash) VALUES (?, ?)")
+        sqlx::query("INSERT INTO mfa_recovery_codes (user_id, code_hash) VALUES ($1, $2)")
             .bind(user_id)
             .bind(hash)
             .execute(&mut *tx)
@@ -658,7 +659,7 @@ pub async fn setup_mfa_secret(
 /// Confirm enrollment by validating a current TOTP from the pending secret.
 /// Returns `true` when the code matched and `mfa_enabled_at` is now set.
 pub async fn enable_mfa(
-    db: &SqlitePool,
+    db: &Pool,
     user_id: i64,
     totp_code: &str,
 ) -> anyhow::Result<bool> {
@@ -668,7 +669,7 @@ pub async fn enable_mfa(
     if !check_totp(&secret, totp_code) {
         return Ok(false);
     }
-    sqlx::query("UPDATE users SET mfa_enabled_at = ? WHERE id = ?")
+    sqlx::query("UPDATE users SET mfa_enabled_at = $1 WHERE id = $2")
         .bind(unix_now())
         .bind(user_id)
         .execute(db)
@@ -679,7 +680,7 @@ pub async fn enable_mfa(
 /// Login-time second-factor check. Accepts a 6-digit TOTP code or one of
 /// the user's unused recovery codes (marked used on success).
 pub async fn verify_mfa_challenge(
-    db: &SqlitePool,
+    db: &Pool,
     user_id: i64,
     code: &str,
 ) -> anyhow::Result<bool> {
@@ -696,13 +697,13 @@ pub async fn verify_mfa_challenge(
 
 /// Fully turn off MFA: clear the secret, the enabled timestamp, and any
 /// recovery codes.
-pub async fn disable_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Result<()> {
+pub async fn disable_mfa(db: &Pool, user_id: i64) -> anyhow::Result<()> {
     let mut tx = db.begin().await?;
-    sqlx::query("UPDATE users SET mfa_secret = NULL, mfa_enabled_at = NULL WHERE id = ?")
+    sqlx::query("UPDATE users SET mfa_secret = NULL, mfa_enabled_at = NULL WHERE id = $1")
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM mfa_recovery_codes WHERE user_id = ?")
+    sqlx::query("DELETE FROM mfa_recovery_codes WHERE user_id = $1")
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
@@ -711,9 +712,9 @@ pub async fn disable_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Result<()> {
 }
 
 /// Returns true iff the user has fully completed enrollment.
-pub async fn user_has_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Result<bool> {
+pub async fn user_has_mfa(db: &Pool, user_id: i64) -> anyhow::Result<bool> {
     let row: Option<(Option<i64>,)> =
-        sqlx::query_as("SELECT mfa_enabled_at FROM users WHERE id = ?")
+        sqlx::query_as("SELECT mfa_enabled_at FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_optional(db)
             .await?;
@@ -721,9 +722,9 @@ pub async fn user_has_mfa(db: &SqlitePool, user_id: i64) -> anyhow::Result<bool>
 }
 
 /// Used by the /account/mfa page to decide which actions to render.
-pub async fn mfa_status(db: &SqlitePool, user_id: i64) -> anyhow::Result<MfaStatus> {
+pub async fn mfa_status(db: &Pool, user_id: i64) -> anyhow::Result<MfaStatus> {
     let row: Option<(Option<String>, Option<i64>)> =
-        sqlx::query_as("SELECT mfa_secret, mfa_enabled_at FROM users WHERE id = ?")
+        sqlx::query_as("SELECT mfa_secret, mfa_enabled_at FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_optional(db)
             .await?;
@@ -734,9 +735,9 @@ pub async fn mfa_status(db: &SqlitePool, user_id: i64) -> anyhow::Result<MfaStat
     })
 }
 
-async fn load_mfa_secret(db: &SqlitePool, user_id: i64) -> anyhow::Result<Option<String>> {
+async fn load_mfa_secret(db: &Pool, user_id: i64) -> anyhow::Result<Option<String>> {
     let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT mfa_secret FROM users WHERE id = ?")
+        sqlx::query_as("SELECT mfa_secret FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_optional(db)
             .await?;
@@ -755,7 +756,7 @@ fn check_totp(secret_base32: &str, code: &str) -> bool {
 }
 
 async fn consume_recovery_code(
-    db: &SqlitePool,
+    db: &Pool,
     user_id: i64,
     candidate: &str,
 ) -> anyhow::Result<bool> {
@@ -763,7 +764,7 @@ async fn consume_recovery_code(
     use argon2::Argon2;
 
     let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT code_hash FROM mfa_recovery_codes WHERE user_id = ? AND used_at IS NULL",
+        "SELECT code_hash FROM mfa_recovery_codes WHERE user_id = $1 AND used_at IS NULL",
     )
     .bind(user_id)
     .fetch_all(db)
@@ -776,8 +777,8 @@ async fn consume_recovery_code(
                 .is_ok()
             {
                 sqlx::query(
-                    "UPDATE mfa_recovery_codes SET used_at = ? \
-                     WHERE user_id = ? AND code_hash = ?",
+                    "UPDATE mfa_recovery_codes SET used_at = $1 \
+                     WHERE user_id = $2 AND code_hash = $3",
                 )
                 .bind(unix_now())
                 .bind(user_id)
@@ -806,12 +807,12 @@ fn generate_recovery_code<R: argon2::password_hash::rand_core::RngCore>(rng: &mu
 /// Look up a still-unverified password account by email. Used by the
 /// "resend verification email" endpoint.
 pub async fn find_unverified_user_id(
-    db: &SqlitePool,
+    db: &Pool,
     email: &str,
 ) -> anyhow::Result<Option<i64>> {
     let row: Option<(i64,)> = sqlx::query_as(
         "SELECT id FROM users \
-         WHERE LOWER(email) = LOWER(?) \
+         WHERE LOWER(email) = LOWER($1) \
            AND password_hash IS NOT NULL \
            AND email_verified_at IS NULL \
          LIMIT 1",

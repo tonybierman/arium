@@ -9,7 +9,7 @@ description = "Reusable authentication library for Dioxus 0.7 fullstack apps."
 path = "src/lib.rs"
 
 [features]
-default = ["server", "ui"]
+default = ["server", "ui", "sqlite"]
 
 # Server-only deps. Disabled when the consuming crate builds for wasm so the
 # library stays compatible with client-side compilation.
@@ -34,9 +34,14 @@ server = [
     "dioxus/server",
 ]
 
-# UI components (LoginPanel, MfaSetup, etc.). Always usable from both client
-# and server targets; toggle off if you only want server primitives.
+# UI components (LoginPanel, etc.).
 ui = ["dep:dioxus-primitives"]
+
+# Pick exactly one of `sqlite` or `postgres`. Default-features enable
+# `sqlite`; consumers wanting Postgres do:
+#   dx-auth = { ..., default-features = false, features = ["server", "ui", "postgres"] }
+sqlite = ["sqlx/sqlite", "axum_session_sqlx/sqlite"]
+postgres = ["sqlx/postgres", "axum_session_sqlx/postgres"]
 
 [dependencies]
 dioxus = { version = "0.7.9", features = ["fullstack"] }
@@ -53,17 +58,16 @@ tower-http = { version = "0.6.8", features = ["auth"], optional = true }
 tower = { version = "0.5.2", optional = true }
 http = { version = "1.3.1", optional = true }
 async-trait = { version = "0.1.88", optional = true }
-sqlx = { version = "0.8.6", features = [
+sqlx = { version = "0.8.6", default-features = false, features = [
     "macros",
     "migrate",
-    "sqlite",
     "_unstable-all-types",
     "tls-native-tls",
     "runtime-tokio",
 ], optional = true }
 axum_session = { version = "0.16.0", optional = true }
 axum_session_auth = { version = "0.16.0", optional = true }
-axum_session_sqlx = { version = "0.5.0", features = ["sqlite"], optional = true }
+axum_session_sqlx = { version = "0.5.0", default-features = false, optional = true }
 oauth2 = { version = "5", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"], optional = true }
 argon2 = { version = "0.5", optional = true }

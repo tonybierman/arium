@@ -8,7 +8,7 @@
 #![cfg(feature = "server")]
 
 use chrono::Duration;
-use sqlx::SqlitePool;
+use crate::pool::Pool;
 
 use crate::auth::OAuthClients;
 use crate::mail::Mailer;
@@ -34,7 +34,7 @@ impl Default for RateLimitConfig {
 /// Everything the library needs to wire itself into a Dioxus fullstack app.
 #[derive(Clone)]
 pub struct AuthConfig {
-    pub(crate) pool: SqlitePool,
+    pub(crate) pool: Pool,
     pub(crate) mailer: Mailer,
     pub(crate) github_oauth: Option<OAuthClients>,
     pub(crate) session_lifetime: Duration,
@@ -47,7 +47,7 @@ pub struct AuthConfig {
 impl AuthConfig {
     /// Start a new builder. `pool` and `mailer` are required up front; everything
     /// else has sensible defaults.
-    pub fn builder(pool: SqlitePool, mailer: Mailer) -> AuthConfigBuilder {
+    pub fn builder(pool: Pool, mailer: Mailer) -> AuthConfigBuilder {
         AuthConfigBuilder {
             pool,
             mailer,
@@ -63,7 +63,7 @@ impl AuthConfig {
 
 /// Builder for [`AuthConfig`]. All methods consume + return `Self`.
 pub struct AuthConfigBuilder {
-    pool: SqlitePool,
+    pool: Pool,
     mailer: Mailer,
     github_oauth: Option<OAuthClients>,
     session_lifetime: Duration,

@@ -32,6 +32,9 @@ pub mod ui;
 pub mod server;
 
 #[cfg(feature = "server")]
+pub mod pool;
+
+#[cfg(feature = "server")]
 pub mod auth;
 
 #[cfg(feature = "server")]
