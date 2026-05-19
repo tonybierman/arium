@@ -121,6 +121,13 @@ pub fn LoginPanel(
                                 password: password_val,
                             });
                         }
+
+                        // Wipe password fields after dispatching so the form
+                        // doesn't keep showing stale entries on retry (also
+                        // means a refused login doesn't leave the password
+                        // sitting in the DOM).
+                        password.set(String::new());
+                        password_confirm.set(String::new());
                     },
 
                     div { class: Styles::login_field,
@@ -211,6 +218,7 @@ pub fn LoginPanel(
                                 let next = if is_signup { SubmitKind::SignIn } else { SubmitKind::SignUp };
                                 mode.set(next);
                                 local_error.set(String::new());
+                                password.set(String::new());
                                 password_confirm.set(String::new());
                             },
                             "{toggle_action_label}"

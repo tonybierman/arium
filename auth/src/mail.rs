@@ -117,6 +117,12 @@ impl Mailer {
             .to(to)
             .subject(subject);
 
+        // Let lettre auto-pick the per-part Content-Transfer-Encoding. For the
+        // plain-text body to stay clean (no quoted-printable `=3D` escapes or
+        // mid-line soft wraps that mangle URLs) every line must be < 76 chars
+        // — see `templates` and the 16-byte token length in `auth.rs`. The
+        // HTML alternative is fine if it picks QP: real email clients decode
+        // it back to working URLs.
         let message = match html {
             Some(html_body) => builder.multipart(
                 MultiPart::alternative()
@@ -157,13 +163,21 @@ impl Mailer {
 
 /// Email templates. Each returns `(subject, plain_text, html_optional)`.
 pub mod templates {
+    /// IMPORTANT: keep every line of the plain-text body shorter than 76
+    /// characters, so lettre picks 7bit transfer encoding and the URL stays
+    /// intact when viewing the raw `.eml` file.
     pub fn password_reset(link: &str) -> (String, String, Option<String>) {
         let subject = "Reset your password".to_string();
         let text = format!(
-            "Hi,\n\n\
-             We received a request to reset your password. Click the link below to set a new one:\n\n\
-             {link}\n\n\
-             This link expires in 1 hour. If you didn't request a reset, ignore this email.\n"
+            "Hi,\n\
+             \n\
+             We received a request to reset your password.\n\
+             Click the link below to choose a new one:\n\
+             \n\
+             {link}\n\
+             \n\
+             This link expires in 1 hour.\n\
+             If you didn't request a reset, ignore this email.\n"
         );
         let html = format!(
             "<p>Hi,</p>\
@@ -177,9 +191,12 @@ pub mod templates {
     pub fn verify_email(link: &str) -> (String, String, Option<String>) {
         let subject = "Verify your email".to_string();
         let text = format!(
-            "Welcome!\n\n\
-             Please verify your email address by clicking the link below:\n\n\
-             {link}\n\n\
+            "Welcome!\n\
+             \n\
+             Please verify your email address by clicking the link below:\n\
+             \n\
+             {link}\n\
+             \n\
              The link expires in 24 hours.\n"
         );
         let html = format!(

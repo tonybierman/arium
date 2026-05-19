@@ -42,6 +42,15 @@ pub enum ProviderId {
     Github,
 }
 
+/// Result of a sign-in or sign-up attempt. `EmailUnverified` is not an
+/// error: it's a successful auth that just needs the user to click the
+/// verification link before we'll log them in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LoginOutcome {
+    LoggedIn,
+    EmailUnverified,
+}
+
 /// Profile fields safe to expose to the client.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct UserProfile {
@@ -139,6 +148,8 @@ enum Route {
     ForgotPassword,
     #[route("/auth/reset?:token")]
     ResetPassword { token: String },
+    #[route("/auth/verify?:token")]
+    VerifyEmail { token: String },
 }
 
 fn app() -> Element {
@@ -182,17 +193,22 @@ fn Home() -> Element {
     let logged_in = current.is_authenticated;
 
     let mut auth_error = use_signal(String::new);
+    let mut pending_email = use_signal::<Option<String>>(|| None);
 
     let on_login_submit = move |submission: LoginSubmit| {
         auth_error.set(String::new());
         let LoginSubmit { kind, email, password } = submission;
+        let email_for_pending = email.clone();
         spawn(async move {
             let result = match kind {
                 SubmitKind::SignIn => login_with_password(email, password).await,
                 SubmitKind::SignUp => register_with_password(email, password).await,
             };
             match result {
-                Ok(()) => profile.restart(),
+                Ok(LoginOutcome::LoggedIn) => profile.restart(),
+                Ok(LoginOutcome::EmailUnverified) => {
+                    pending_email.set(Some(email_for_pending));
+                }
                 Err(e) => auth_error.set(friendly_server_error(e)),
             }
         });
@@ -224,6 +240,14 @@ fn Home() -> Element {
                 if let Some(Ok(perms)) = permissions.value().as_ref() {
                     pre { class: "app-debug", "Permissions: {perms:?}" }
                 }
+            } else if let Some(email) = pending_email() {
+                VerificationPending {
+                    email,
+                    on_back: move |_| {
+                        pending_email.set(None);
+                        auth_error.set(String::new());
+                    },
+                }
             } else {
                 LoginPanel {
                     providers: providers.clone(),
@@ -236,6 +260,90 @@ fn Home() -> Element {
                     },
                     on_submit: on_login_submit,
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn VerificationPending(email: String, on_back: EventHandler<()>) -> Element {
+    let mut resending = use_signal(|| false);
+    let mut resent = use_signal(|| false);
+    let email_for_resend = email.clone();
+
+    rsx! {
+        Card { class: "login-panel",
+            CardHeader {
+                CardTitle { "Check your inbox" }
+                CardDescription {
+                    "We sent a verification link to "
+                    strong { "{email}" }
+                    ". Click it to finish signing in."
+                }
+            }
+            CardContent {
+                div { class: "auth-form",
+                    if resent() {
+                        p { class: "auth-success", "Sent another link." }
+                    }
+
+                    Button {
+                        variant: ButtonVariant::Outline,
+                        onclick: move |_| {
+                            let email = email_for_resend.clone();
+                            resending.set(true);
+                            spawn(async move {
+                                let _ = resend_verification_email(email).await;
+                                resending.set(false);
+                                resent.set(true);
+                            });
+                        },
+                        if resending() { "Sending…" } else { "Resend verification email" }
+                    }
+
+                    p { class: "auth-aux",
+                        a {
+                            href: "#",
+                            onclick: move |evt| {
+                                evt.prevent_default();
+                                on_back.call(());
+                            },
+                            "Back to sign in"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn VerifyEmail(token: String) -> Element {
+    let token_for_call = token.clone();
+    let result = use_resource(move || {
+        let token = token_for_call.clone();
+        async move { verify_email(token).await }
+    });
+
+    let body = match result() {
+        None => rsx! { p { class: "auth-success", "Verifying…" } },
+        Some(Ok(true)) => rsx! {
+            p { class: "auth-success", "Email verified — you can sign in now." }
+            p { a { href: "/", "Continue to sign in" } }
+        },
+        Some(Ok(false)) | Some(Err(_)) => rsx! {
+            p { class: "auth-error", "This verification link has expired or already been used." }
+            p { a { href: "/", "Back to sign in" } }
+        },
+    };
+
+    rsx! {
+        main { class: "app-shell",
+            Card { class: "login-panel",
+                CardHeader {
+                    CardTitle { "Verify your email" }
+                }
+                CardContent { {body} }
             }
         }
     }
@@ -519,23 +627,69 @@ pub async fn reset_password(token: String, new_password: String) -> Result<()> {
     Ok(())
 }
 
-/// Create a new email/password account and log it in.
-#[post("/api/user/register-password", auth: auth::Session, db: DbExtension)]
-pub async fn register_with_password(email: String, password: String) -> Result<()> {
+/// Create a new email/password account. Issues an email verification token
+/// and sends the link via the Mailer. The user is **not** logged in until
+/// they click the link.
+#[post("/api/user/register-password", db: DbExtension, mail: MailExtension)]
+pub async fn register_with_password(email: String, password: String) -> Result<LoginOutcome> {
     let user_id = auth::create_password_user(&db.0, &email, &password).await?;
-    auth.login_user(user_id);
-    Ok(())
+    send_verification_email(&db.0, &mail.0, user_id, &email).await;
+    Ok(LoginOutcome::EmailUnverified)
 }
 
 /// Log in with an existing email/password account.
 #[post("/api/user/login-password", auth: auth::Session, db: DbExtension)]
-pub async fn login_with_password(email: String, password: String) -> Result<()> {
+pub async fn login_with_password(email: String, password: String) -> Result<LoginOutcome> {
     match auth::verify_password_user(&db.0, &email, &password).await? {
-        Some(user_id) => {
+        auth::VerifyOutcome::Verified(user_id) => {
             auth.login_user(user_id);
-            Ok(())
+            Ok(LoginOutcome::LoggedIn)
         }
-        None => Err(ServerFnError::new("Invalid email or password.").into()),
+        auth::VerifyOutcome::Unverified => Ok(LoginOutcome::EmailUnverified),
+        auth::VerifyOutcome::Invalid => {
+            Err(ServerFnError::new("Invalid email or password.").into())
+        }
+    }
+}
+
+/// Re-issue a verification email for an account that hasn't yet confirmed.
+/// Always returns Ok so the response can't be used to enumerate which
+/// addresses are registered and unverified.
+#[post("/api/user/resend-verification", db: DbExtension, mail: MailExtension)]
+pub async fn resend_verification_email(email: String) -> Result<()> {
+    if let Some(user_id) = auth::find_unverified_user_id(&db.0, &email).await? {
+        send_verification_email(&db.0, &mail.0, user_id, &email).await;
+    }
+    Ok(())
+}
+
+/// Consume an email-verification token from the link in the user's inbox.
+/// On success the account becomes verified and any subsequent sign-in is
+/// allowed; the user still needs to enter credentials on the home page.
+#[post("/api/user/verify-email", db: DbExtension)]
+pub async fn verify_email(token: String) -> Result<bool> {
+    Ok(auth::consume_verification_token(&db.0, &token).await?.is_some())
+}
+
+/// Shared helper: issue a token and send the verification email. Failures
+/// are logged but never bubble up to the caller — we don't want a flaky
+/// SMTP relay to fail the user-facing sign-up.
+#[cfg(feature = "server")]
+async fn send_verification_email(
+    db: &sqlx::SqlitePool,
+    mail: &crate::mail::Mailer,
+    user_id: i64,
+    to: &str,
+) {
+    match auth::issue_verification_token(db, user_id).await {
+        Ok(token) => {
+            let link = format!("{}/auth/verify?token={token}", mail.base_url());
+            let (subject, text, html) = crate::mail::templates::verify_email(&link);
+            if let Err(err) = mail.send(to, &subject, &text, html.as_deref()).await {
+                eprintln!("[mail] WARN: failed to send verification email: {err}");
+            }
+        }
+        Err(err) => eprintln!("[mail] WARN: failed to issue verification token: {err}"),
     }
 }
 

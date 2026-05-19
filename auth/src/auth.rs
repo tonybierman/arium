@@ -241,16 +241,18 @@ pub(crate) async fn upsert_github_user(
         }
     }
 
-    // 3) Brand-new user.
+    // 3) Brand-new user. GitHub already verifies the address, so we mark
+    //    `email_verified_at` now to skip the verification email flow.
     let (user_id,): (i64,) = sqlx::query_as(
-        "INSERT INTO users (anonymous, username, name, email, avatar_url, html_url) \
-         VALUES (false, ?, ?, ?, ?, ?) RETURNING id",
+        "INSERT INTO users (anonymous, username, name, email, avatar_url, html_url, email_verified_at) \
+         VALUES (false, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(profile.login)
     .bind(profile.name)
     .bind(profile.email)
     .bind(profile.avatar_url)
     .bind(profile.html_url)
+    .bind(unix_now())
     .fetch_one(db)
     .await?;
 
@@ -358,7 +360,11 @@ pub(crate) async fn request_password_reset(
         return Ok(None);
     };
 
-    let mut bytes = [0u8; 32];
+    // 16 random bytes = 128 bits of entropy, plenty for short-lived
+    // single-use tokens. Hex-encoded that's 32 chars, which keeps the
+    // resulting reset/verify URL under 76 chars so the plain-text email body
+    // stays in 7bit transfer encoding (clean URLs in raw `.eml` views).
+    let mut bytes = [0u8; 16];
     let mut rng = OsRng;
     rng.fill_bytes(&mut bytes);
     let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
@@ -435,21 +441,29 @@ fn unix_now() -> i64 {
         .as_secs() as i64
 }
 
-/// Verify an email/password pair.
+/// Result of a password verification attempt.
 ///
-/// `Ok(Some(id))` on success, `Ok(None)` on any failure (no such user, wrong
-/// password, malformed stored hash). Errors that bubble up are reserved for
-/// genuinely unexpected database issues.
+/// The UI distinguishes `Unverified` so it can offer "Resend verification
+/// email"; `Invalid` collapses the "no such account" and "wrong password"
+/// cases into one to avoid user enumeration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VerifyOutcome {
+    Verified(i64),
+    Unverified,
+    Invalid,
+}
+
+/// Verify an email/password pair and the account's email-verified status.
 pub(crate) async fn verify_password_user(
     db: &SqlitePool,
     email: &str,
     password: &str,
-) -> anyhow::Result<Option<i64>> {
+) -> anyhow::Result<VerifyOutcome> {
     use argon2::password_hash::{PasswordHash, PasswordVerifier};
     use argon2::Argon2;
 
-    let row: Option<(i64, String)> = sqlx::query_as(
-        "SELECT id, password_hash FROM users \
+    let row: Option<(i64, String, Option<i64>)> = sqlx::query_as(
+        "SELECT id, password_hash, email_verified_at FROM users \
          WHERE LOWER(email) = LOWER(?) AND password_hash IS NOT NULL \
          LIMIT 1",
     )
@@ -457,20 +471,107 @@ pub(crate) async fn verify_password_user(
     .fetch_optional(db)
     .await?;
 
-    let Some((user_id, stored_hash)) = row else {
-        return Ok(None);
+    let Some((user_id, stored_hash, verified_at)) = row else {
+        return Ok(VerifyOutcome::Invalid);
     };
 
     let Ok(parsed) = PasswordHash::new(&stored_hash) else {
-        return Ok(None);
+        return Ok(VerifyOutcome::Invalid);
     };
 
     if Argon2::default()
         .verify_password(password.as_bytes(), &parsed)
-        .is_ok()
+        .is_err()
     {
-        Ok(Some(user_id))
-    } else {
-        Ok(None)
+        return Ok(VerifyOutcome::Invalid);
     }
+
+    if verified_at.is_none() {
+        return Ok(VerifyOutcome::Unverified);
+    }
+
+    Ok(VerifyOutcome::Verified(user_id))
+}
+
+/// Issue a 24-hour email verification token for the given user.
+pub(crate) async fn issue_verification_token(
+    db: &SqlitePool,
+    user_id: i64,
+) -> anyhow::Result<String> {
+    use argon2::password_hash::rand_core::{OsRng, RngCore};
+
+    // 16 random bytes = 128 bits of entropy, plenty for short-lived
+    // single-use tokens. Hex-encoded that's 32 chars, which keeps the
+    // resulting reset/verify URL under 76 chars so the plain-text email body
+    // stays in 7bit transfer encoding (clean URLs in raw `.eml` views).
+    let mut bytes = [0u8; 16];
+    let mut rng = OsRng;
+    rng.fill_bytes(&mut bytes);
+    let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+
+    let expires_at = unix_now() + 24 * 3600;
+
+    sqlx::query(
+        "INSERT INTO email_verification_tokens (token, user_id, expires_at) VALUES (?, ?, ?)",
+    )
+    .bind(&token)
+    .bind(user_id)
+    .bind(expires_at)
+    .execute(db)
+    .await?;
+
+    Ok(token)
+}
+
+/// Consume an email verification token: mark the user verified, delete all
+/// outstanding tokens for them, and return the user id. Returns `None` when
+/// the token is unknown or expired.
+pub(crate) async fn consume_verification_token(
+    db: &SqlitePool,
+    token: &str,
+) -> anyhow::Result<Option<i64>> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT user_id FROM email_verification_tokens WHERE token = ? AND expires_at > ? LIMIT 1",
+    )
+    .bind(token)
+    .bind(unix_now())
+    .fetch_optional(db)
+    .await?;
+
+    let Some((user_id,)) = row else {
+        return Ok(None);
+    };
+
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE users SET email_verified_at = ? WHERE id = ?")
+        .bind(unix_now())
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM email_verification_tokens WHERE user_id = ?")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    Ok(Some(user_id))
+}
+
+/// Look up a still-unverified password account by email. Used by the
+/// "resend verification email" endpoint.
+pub(crate) async fn find_unverified_user_id(
+    db: &SqlitePool,
+    email: &str,
+) -> anyhow::Result<Option<i64>> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM users \
+         WHERE LOWER(email) = LOWER(?) \
+           AND password_hash IS NOT NULL \
+           AND email_verified_at IS NULL \
+         LIMIT 1",
+    )
+    .bind(email.trim())
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|(id,)| id))
 }
