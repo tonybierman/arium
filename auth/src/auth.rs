@@ -137,15 +137,32 @@ pub(crate) struct GithubProfile<'a> {
     pub html_url: Option<&'a str>,
 }
 
-/// Find-or-create a local user row linked to the given GitHub identity, returning the local id.
-/// On a repeat login the existing row's profile fields are refreshed so the local copy stays
-/// in sync with GitHub.
+/// Find-or-create-or-link a local user row for the given GitHub identity.
+///
+/// Three branches, tried in order:
+///
+/// 1. **Repeat OAuth login** — `oauth_accounts` already has a row for this
+///    GitHub id. Refresh the cached GitHub profile fields and return the
+///    existing local user id.
+/// 2. **First GitHub login, but a local account already exists with the same
+///    email** — link by inserting only an `oauth_accounts` row pointing at
+///    that user; refresh display fields (name/avatar/html_url) but preserve
+///    `username`, `email`, and `password_hash` so the account's password
+///    sign-in keeps working unchanged.
+/// 3. **Brand-new user** — insert a new `users` row, link via
+///    `oauth_accounts`, and seed default permissions.
+///
+/// GitHub's `/user` only returns `email` when the user has made it public,
+/// so the link branch is best-effort. Linking is safe because the email on
+/// `GithubProfile` came from an authenticated GitHub session — i.e. the
+/// caller already controls that mailbox.
 pub(crate) async fn upsert_github_user(
     db: &SqlitePool,
     profile: GithubProfile<'_>,
 ) -> anyhow::Result<i64> {
     let github_id_str = profile.id.to_string();
 
+    // 1) Already linked → refresh + return.
     let existing: Option<(i64,)> = sqlx::query_as(
         "SELECT user_id FROM oauth_accounts WHERE provider = 'github' AND provider_user_id = ?",
     )
@@ -169,6 +186,40 @@ pub(crate) async fn upsert_github_user(
         return Ok(user_id);
     }
 
+    // 2) Email matches an existing local account → link rather than duplicate.
+    if let Some(email) = profile.email {
+        let matched: Option<(i64,)> = sqlx::query_as(
+            "SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1",
+        )
+        .bind(email)
+        .fetch_optional(db)
+        .await?;
+
+        if let Some((user_id,)) = matched {
+            sqlx::query(
+                "INSERT INTO oauth_accounts (provider, provider_user_id, user_id) \
+                 VALUES ('github', ?, ?)",
+            )
+            .bind(&github_id_str)
+            .bind(user_id)
+            .execute(db)
+            .await?;
+
+            sqlx::query(
+                "UPDATE users SET name = ?, avatar_url = ?, html_url = ? WHERE id = ?",
+            )
+            .bind(profile.name)
+            .bind(profile.avatar_url)
+            .bind(profile.html_url)
+            .bind(user_id)
+            .execute(db)
+            .await?;
+
+            return Ok(user_id);
+        }
+    }
+
+    // 3) Brand-new user.
     let (user_id,): (i64,) = sqlx::query_as(
         "INSERT INTO users (anonymous, username, name, email, avatar_url, html_url) \
          VALUES (false, ?, ?, ?, ?, ?) RETURNING id",
