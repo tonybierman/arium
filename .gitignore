@@ -11,6 +11,10 @@ auth/auth.db-shm
 # Dev-mode email fallback (Phase 5).
 auth/emails/
 
+# Personal scratch notes
+TODO.md
+TODO*.md
+
 # Editor / OS junk
 .DS_Store
 .idea/
