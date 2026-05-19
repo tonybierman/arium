@@ -36,6 +36,12 @@ use crate::server::{github_callback, github_login};
 pub async fn install(router: Router, cfg: AuthConfig) -> anyhow::Result<Router> {
     let mut router = router;
 
+    // 0) Reconcile bootstrap admin from env. Idempotent — grants the `admin`
+    // role to whoever `DX_AUTH_BOOTSTRAP_ADMIN_EMAIL` points at if that user
+    // already exists. Pairs with `maybe_bootstrap_admin` on the signup path
+    // and `maybe_grant_first_admin` (first-user-wins).
+    crate::auth::sync_bootstrap_admin(&cfg.pool).await?;
+
     // 1) GitHub OAuth routes, opt-in (compiled out without `oauth-github`).
     #[cfg(feature = "oauth-github")]
     if let Some(clients) = cfg.github_oauth.clone() {

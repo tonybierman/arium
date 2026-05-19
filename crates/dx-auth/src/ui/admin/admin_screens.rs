@@ -14,7 +14,11 @@ use crate::ui::components::pagination::{
     Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
 };
 use crate::ui::components::skeleton::Skeleton;
+use crate::ui::components::virtual_list::VirtualList;
 use crate::wire::AdminUserSummary;
+
+const USER_COLUMNS: &str =
+    "--data-cols: minmax(10rem, 2fr) minmax(10rem, 2fr) minmax(8rem, 1.25fr) minmax(8rem, 1.25fr);";
 
 /// Companion stylesheet for the admin tables / detail layout. Same trick
 /// the LoginPanel uses: render `document::Stylesheet` so the link tag is
@@ -50,26 +54,26 @@ pub fn AdminUserList(on_select: EventHandler<i64>) -> Element {
         }
         Some(Ok(list)) => {
             let last_page = list.len() < 100;
+            let count = list.len();
+            let rows_signal = use_signal(|| list.clone());
             rsx! {
-                div { class: Styles::table_scroll,
-                    table { class: Styles::admin_table,
-                        thead {
-                            tr {
-                                th { "User" }
-                                th { "Email" }
-                                th { "Roles" }
-                                th { "Status" }
-                            }
-                        }
-                        tbody {
-                            for user in list.iter() {
-                                AdminUserRow {
-                                    key: "{user.id}",
-                                    user: user.clone(),
-                                    on_select,
-                                }
-                            }
-                        }
+                div { class: Styles::data_list, style: USER_COLUMNS,
+                    div {
+                        class: Styles::data_header,
+                        role: "row",
+                        div { "User" }
+                        div { "Email" }
+                        div { "Roles" }
+                        div { "Status" }
+                    }
+                    VirtualList {
+                        count,
+                        estimate_size: |_idx| 56,
+                        class: Styles::data_virtual,
+                        render_item: move |idx: usize| {
+                            let user = rows_signal.read()[idx].clone();
+                            rsx! { AdminUserRow { user, on_select } }
+                        },
                     }
                 }
                 div { class: Styles::admin_pager,
@@ -103,13 +107,7 @@ pub fn AdminUserList(on_select: EventHandler<i64>) -> Element {
     rsx! {
         document::Stylesheet { href: ADMIN_CSS }
         div { class: Styles::admin_shell,
-            Card {
-                CardHeader {
-                    CardTitle { "Users" }
-                    CardDescription { "Click a row to view details, change roles, or delete the account." }
-                }
-                CardContent { {body} }
-            }
+            {body}
         }
     }
 }
@@ -133,9 +131,10 @@ fn AdminUserRow(user: AdminUserSummary, on_select: EventHandler<i64>) -> Element
     };
 
     rsx! {
-        tr {
-            tabindex: "0",
+        div {
+            class: Styles::data_row,
             role: "button",
+            tabindex: "0",
             onclick: move |_| on_select.call(id),
             onkeydown: move |evt: KeyboardEvent| {
                 let k = evt.key();
@@ -144,20 +143,22 @@ fn AdminUserRow(user: AdminUserSummary, on_select: EventHandler<i64>) -> Element
                     on_select.call(id);
                 }
             },
-            td {
+            div { class: Styles::data_cell, "data-label": "User",
                 strong { "{display}" }
                 " "
                 small { "#{id}" }
             }
-            td { "{user.email.clone().unwrap_or_default()}" }
-            td {
+            div { class: Styles::data_cell, "data-label": "Email",
+                "{user.email.clone().unwrap_or_default()}"
+            }
+            div { class: Styles::data_cell, "data-label": "Roles",
                 span { class: Styles::admin_row_roles,
                     for name in role_names.iter() {
                         Badge { key: "{name}", variant: BadgeVariant::Secondary, "{name}" }
                     }
                 }
             }
-            td {
+            div { class: Styles::data_cell, "data-label": "Status",
                 span { class: Styles::admin_row_roles,
                     Badge { variant: status_variant, "{status_label}" }
                     if user.mfa_enabled {

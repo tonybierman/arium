@@ -6,7 +6,19 @@ use crate::ui::components::button::{Button, ButtonVariant};
 use crate::ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
 use crate::ui::components::input::Input;
 use crate::ui::components::label::Label;
+use crate::ui::components::virtual_list::VirtualList;
 use crate::wire::{AuditEventView, AuditQuery};
+
+const ADMIN_CSS: Asset = asset!(
+    "/src/ui/admin/style.css",
+    AssetOptions::css_module()
+);
+
+#[css_module("/src/ui/admin/style.css")]
+struct Styles;
+
+const AUDIT_COLUMNS: &str =
+    "--data-cols: minmax(10rem, 1.25fr) minmax(10rem, 1.25fr) minmax(8rem, 1fr) minmax(8rem, 1fr) minmax(6rem, 0.75fr) minmax(8rem, 1.5fr);";
 
 /// Filterable, paginated audit-log table. Requires `admin:audit:read`
 /// on the signed-in user; the server fn enforces this and the table
@@ -88,6 +100,7 @@ pub fn AuditLog() -> Element {
     };
 
     rsx! {
+        document::Stylesheet { href: ADMIN_CSS }
         Card { class: "login-panel",
             CardHeader {
                 CardTitle { "Audit log" }
@@ -152,22 +165,28 @@ fn EventTable(rows: Vec<AuditEventView>) -> Element {
     if rows.is_empty() {
         return rsx! { p { "No matching events." } };
     }
+    let count = rows.len();
+    let rows_signal = use_signal(|| rows);
     rsx! {
-        table { class: "dx-admin-table dx-audit-table",
-            thead {
-                tr {
-                    th { "When" }
-                    th { "Event" }
-                    th { "Actor" }
-                    th { "Target" }
-                    th { "IP" }
-                    th { "Details" }
-                }
+        div { class: Styles::data_list, style: AUDIT_COLUMNS,
+            div {
+                class: Styles::data_header,
+                role: "row",
+                div { "When" }
+                div { "Event" }
+                div { "Actor" }
+                div { "Target" }
+                div { "IP" }
+                div { "Details" }
             }
-            tbody {
-                for row in rows.iter() {
-                    EventRow { key: "{row.id}", row: row.clone() }
-                }
+            VirtualList {
+                count,
+                estimate_size: |_idx| 56,
+                class: Styles::data_virtual,
+                render_item: move |idx: usize| {
+                    let row = rows_signal.read()[idx].clone();
+                    rsx! { EventRow { row } }
+                },
             }
         }
     }
@@ -180,15 +199,20 @@ fn EventRow(row: AuditEventView) -> Element {
     let ip = row.ip.clone().unwrap_or_else(|| "—".to_string());
     let details = row.details.clone().unwrap_or_default();
     rsx! {
-        tr {
-            td { "{row.occurred_at_iso}" }
-            td { code { "{row.event_type}" } }
-            td { "{actor}" }
-            td { "{target}" }
-            td { "{ip}" }
-            td {
+        div {
+            class: Styles::data_row,
+            role: "row",
+            "data-static": "true",
+            div { class: Styles::data_cell, "data-label": "When", "{row.occurred_at_iso}" }
+            div { class: Styles::data_cell, "data-label": "Event",
+                code { "{row.event_type}" }
+            }
+            div { class: Styles::data_cell, "data-label": "Actor", "{actor}" }
+            div { class: Styles::data_cell, "data-label": "Target", "{target}" }
+            div { class: Styles::data_cell, "data-label": "IP", "{ip}" }
+            div { class: Styles::data_cell, "data-label": "Details",
                 if !details.is_empty() {
-                    code { class: "dx-audit-details", "{details}" }
+                    code { "{details}" }
                 } else {
                     "—"
                 }

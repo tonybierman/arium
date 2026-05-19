@@ -14,3 +14,4 @@ pub mod alert_dialog;
 pub mod pagination;
 pub mod skeleton;
 pub mod badge;
+pub mod virtual_list;

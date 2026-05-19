@@ -154,7 +154,7 @@ fn Home() -> Element {
                                 TabTrigger { index: 0_usize, value: "account".to_string(), "Account" }
                                 TabTrigger { index: 1_usize, value: "mfa".to_string(),     "Two-factor auth" }
                                 if can_admin_users {
-                                    TabTrigger { index: 2_usize, value: "admin".to_string(),   "Admin" }
+                                    TabTrigger { index: 2_usize, value: "admin".to_string(),   "Users" }
                                 }
                                 if can_audit {
                                     TabTrigger { index: 3_usize, value: "audit".to_string(),   "Audit log" }
@@ -162,17 +162,7 @@ fn Home() -> Element {
                             }
                             TabContent { index: 0_usize, value: "account".to_string(),
                                 ProfileCard { profile: profile_for_tab }
-                                div { class: "app-actions-buttons",
-                                    Button {
-                                        variant: ButtonVariant::Ghost,
-                                        onclick: move |_| async move {
-                                            logout.call().await;
-                                            profile.restart();
-                                        },
-                                        "Sign out"
-                                    }
-                                }
-                                dx_auth::ui::AccountSettings { mfa_setup_href: "/account/mfa" }
+                                dx_auth::ui::AccountSettings {}
                             }
                             TabContent { index: 1_usize, value: "mfa".to_string(),
                                 MfaSetup {}
@@ -186,6 +176,16 @@ fn Home() -> Element {
                                 TabContent { index: 3_usize, value: "audit".to_string(),
                                     dx_auth::ui::AuditLog {}
                                 }
+                            }
+                        }
+                        div { class: "app-actions-buttons",
+                            Button {
+                                variant: ButtonVariant::Outline,
+                                onclick: move |_| async move {
+                                    logout.call().await;
+                                    profile.restart();
+                                },
+                                "Sign out"
                             }
                         }
                     }
@@ -259,16 +259,16 @@ fn ProfileCard(profile: UserProfile) -> Element {
                 div { class: "profile-card-text",
                     div { class: "profile-card-name", "{display_name}" }
                     div { class: "profile-card-handle", "@{handle}" }
-                }
-            }
-            ul { class: "profile-card-meta",
-                if let Some(addr) = email {
-                    li { "Email: {addr}" }
-                }
-                if let Some(url) = html_url {
-                    li {
-                        "Profile: "
-                        a { href: "{url}", target: "_blank", "{url}" }
+                    if let Some(addr) = email {
+                        div { class: "profile-card-email", "{addr}" }
+                    }
+                    if let Some(url) = html_url {
+                        a {
+                            class: "profile-card-link",
+                            href: "{url}",
+                            target: "_blank",
+                            "{url}"
+                        }
                     }
                 }
             }
@@ -882,7 +882,7 @@ pub async fn get_permissions() -> Result<HashSet<String>> {
 fn AccountSettingsPage() -> Element {
     rsx! {
         main { class: "app-shell",
-            dx_auth::ui::AccountSettings { mfa_setup_href: "/account/mfa" }
+            dx_auth::ui::AccountSettings {}
             p { class: "auth-aux", a { href: "/", "← Back to home" } }
         }
     }

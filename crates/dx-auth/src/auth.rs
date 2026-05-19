@@ -276,6 +276,7 @@ pub async fn upsert_github_user(
 
     assign_default_role(db, user_id).await?;
     maybe_bootstrap_admin(db, user_id, profile.email).await?;
+    maybe_grant_first_admin(db, user_id).await?;
 
     Ok(user_id)
 }
@@ -301,16 +302,93 @@ pub async fn maybe_bootstrap_admin(
     email: Option<&str>,
 ) -> anyhow::Result<()> {
     let Some(email) = email else { return Ok(()) };
-    let target = std::env::var("DX_AUTH_BOOTSTRAP_ADMIN_EMAIL")
-        .or_else(|_| std::env::var("BOOTSTRAP_ADMIN_EMAIL"))
-        .ok()
-        .filter(|s| !s.is_empty());
+    let target = bootstrap_admin_email();
     if let Some(t) = target {
         if t.eq_ignore_ascii_case(email) {
             grant_role(db, user_id, role::ADMIN).await?;
         }
     }
     Ok(())
+}
+
+/// First-user-wins hook called after every successful new-user insert.
+/// Grants the `admin` role when nobody currently holds it — convention
+/// shared by Sentry, GitLab, and friends so a fresh install always has
+/// at least one admin without any operator action.
+///
+/// Soft-deleted users have their `user_roles` rows wiped (see
+/// `soft_delete_user`), so this also self-recovers if the last admin
+/// gets deleted: the next new signup is promoted.
+///
+/// Concurrency: two simultaneous first-time signups could both pass the
+/// "no admin yet" check and both get promoted. That's harmless — the
+/// race window is tiny and applies only to the very first signups on a
+/// brand-new install.
+pub async fn maybe_grant_first_admin(db: &Pool, user_id: i64) -> anyhow::Result<()> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_roles WHERE role_id = $1")
+        .bind(role::ADMIN)
+        .fetch_one(db)
+        .await?;
+    if count == 0 {
+        grant_role(db, user_id, role::ADMIN).await?;
+        eprintln!(
+            "[startup] bootstrap-admin: promoted user {user_id} to admin (first signup, \
+             no existing admins)"
+        );
+    }
+    Ok(())
+}
+
+/// Startup-time admin sync. If `DX_AUTH_BOOTSTRAP_ADMIN_EMAIL` is set
+/// and the named account already exists in the `users` table, ensure
+/// they hold the `admin` role. Complements [`maybe_bootstrap_admin`],
+/// which only fires during signup — this runs every boot, so it covers:
+///
+/// - operator sets the env var after the user already signed up
+/// - operator signed up via OAuth with a different address than the env var
+/// - the admin was accidentally revoked and needs restoring on next deploy
+///
+/// No-op when the env var is unset, empty, or the email doesn't match
+/// any (non-soft-deleted) account.
+pub async fn sync_bootstrap_admin(db: &Pool) -> anyhow::Result<()> {
+    let Some(email) = bootstrap_admin_email() else { return Ok(()) };
+
+    let user: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM users \
+         WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL \
+         LIMIT 1",
+    )
+    .bind(email.trim())
+    .fetch_optional(db)
+    .await?;
+
+    let Some((user_id,)) = user else {
+        eprintln!(
+            "[startup] bootstrap-admin: no account for {email} yet — they'll be promoted on signup"
+        );
+        return Ok(());
+    };
+
+    let already: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_roles WHERE user_id = $1 AND role_id = $2",
+    )
+    .bind(user_id)
+    .bind(role::ADMIN)
+    .fetch_one(db)
+    .await?;
+
+    if already == 0 {
+        grant_role(db, user_id, role::ADMIN).await?;
+        eprintln!("[startup] bootstrap-admin: granted admin role to {email} (user id {user_id})");
+    }
+    Ok(())
+}
+
+fn bootstrap_admin_email() -> Option<String> {
+    std::env::var("DX_AUTH_BOOTSTRAP_ADMIN_EMAIL")
+        .or_else(|_| std::env::var("BOOTSTRAP_ADMIN_EMAIL"))
+        .ok()
+        .filter(|s| !s.is_empty())
 }
 
 /// Grant the baseline role every newly-created (non-anonymous) account gets.
@@ -649,6 +727,7 @@ pub async fn create_password_user(
 
     assign_default_role(db, user_id).await?;
     maybe_bootstrap_admin(db, user_id, Some(email)).await?;
+    maybe_grant_first_admin(db, user_id).await?;
     Ok(user_id)
 }
 

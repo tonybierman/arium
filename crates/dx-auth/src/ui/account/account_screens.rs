@@ -1,6 +1,15 @@
 use dioxus::prelude::*;
 
 use crate::friendly_server_error;
+
+async fn dismiss_after(duration: std::time::Duration) {
+    #[cfg(target_arch = "wasm32")]
+    gloo_timers::future::sleep(duration).await;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = duration;
+    }
+}
 use crate::server::{
     change_password, delete_my_account, get_account_view, update_display_name,
 };
@@ -10,10 +19,10 @@ use crate::ui::components::input::Input;
 use crate::ui::components::label::Label;
 
 /// Top-level account self-service panel: display name editor, password
-/// change, linked accounts list, and the soft-delete section. The MFA
-/// section just links to the app's existing /account/mfa route.
+/// change, linked accounts list, and the soft-delete section. MFA lives
+/// in its own tab.
 #[component]
-pub fn AccountSettings(#[props(default = "/account/mfa")] mfa_setup_href: &'static str) -> Element {
+pub fn AccountSettings() -> Element {
     let mut view = use_resource(|| async { get_account_view().await });
 
     let body = match view() {
@@ -26,7 +35,6 @@ pub fn AccountSettings(#[props(default = "/account/mfa")] mfa_setup_href: &'stat
             let display = v.display_name.clone().unwrap_or_default();
             let has_password = v.has_password;
             let providers = v.linked_oauth_providers.clone();
-            let mfa_enabled = v.mfa_enabled;
             rsx! {
                 div { class: "auth-form",
                     h3 { "Profile" }
@@ -49,16 +57,6 @@ pub fn AccountSettings(#[props(default = "/account/mfa")] mfa_setup_href: &'stat
                                 li { key: "{p}", "{p}" }
                             }
                         }
-                    }
-
-                    h3 { "Two-factor authentication" }
-                    if mfa_enabled {
-                        p {
-                            "Enabled. "
-                            a { href: "{mfa_setup_href}", "Manage" }
-                        }
-                    } else {
-                        p { a { href: "{mfa_setup_href}", "Set up two-factor auth" } }
                     }
 
                     h3 { "Danger zone" }
@@ -100,6 +98,10 @@ fn DisplayNameForm(initial: String, on_saved: EventHandler<()>) -> Element {
                         Ok(()) => {
                             info_msg.set("Saved.".to_string());
                             on_saved.call(());
+                            spawn(async move {
+                                dismiss_after(std::time::Duration::from_secs(3)).await;
+                                info_msg.set(String::new());
+                            });
                         }
                         Err(e) => error.set(friendly_server_error(e)),
                     }
@@ -164,6 +166,10 @@ fn ChangePasswordForm() -> Element {
                             current.set(String::new());
                             new_pw.set(String::new());
                             confirm.set(String::new());
+                            spawn(async move {
+                                dismiss_after(std::time::Duration::from_secs(3)).await;
+                                info_msg.set(String::new());
+                            });
                         }
                         Err(e) => error.set(friendly_server_error(e)),
                     }
