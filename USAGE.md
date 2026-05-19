@@ -14,7 +14,11 @@ directory (rename-prefix if you collide with your own files) — then in
 your fullstack entry point:
 
 ```rust
-use dx_auth::{AuthConfig, Mailer, auth::OAuthClients, server::*};
+use dx_auth::{
+    AuthConfig, Mailer,
+    oauth::github::GithubProvider,
+    server::*,
+};
 
 #[cfg(feature = "server")]
 dioxus::serve(|| async {
@@ -23,31 +27,57 @@ dioxus::serve(|| async {
         .await?;
     sqlx::migrate!().run(&pool).await?;     // your migrations + the ones you copied
 
-    let cfg = AuthConfig::builder(pool.clone(), Mailer::from_env()?)
-        .github(OAuthClients::from_env(pool.clone())?)
-        .build();
+    let builder = AuthConfig::builder(pool.clone(), Mailer::from_env()?);
+    let builder = match GithubProvider::from_env()? {
+        Some(gh) => builder.oauth_provider(gh),
+        None => builder,
+    };
 
-    dx_auth::install(dioxus::server::router(app), cfg).await
+    dx_auth::install(dioxus::server::router(app), builder.build()).await
 });
 ```
 
-Then somewhere in your client-side UI:
+Then somewhere in your client-side UI — driven by what
+`available_providers` returns from the server, which means buttons
+appear / disappear based on which providers you registered above:
 
 ```rust
 use dx_auth::ui::{LoginPanel, LoginProvider};
+use dx_auth::server::available_providers;
+
+let providers_resource = use_resource(available_providers);
+let providers: Vec<LoginProvider> = providers_resource()
+    .and_then(|r| r.ok())
+    .unwrap_or_default()
+    .into_iter()
+    .map(LoginProvider::from)        // ProviderInfo → LoginProvider
+    .collect();
 
 LoginPanel {
-    providers: vec![LoginProvider {
-        name: "GitHub",
-        href: "/auth/github/login",
-        icon_svg: Some(GITHUB_ICON_SVG),
-    }],
+    providers,
     title: "Welcome back",
     description: "Sign in to your workspace.",
     forgot_href: "/auth/forgot",
     on_submit: handler,
 }
 ```
+
+### Adding a new OAuth provider
+
+Each provider is a struct that implements `dx_auth::oauth::OAuthProvider`.
+The trait is small — id/secret/URLs, scopes, and a `fetch_profile` that
+hits the provider's user-info endpoint and returns a
+`NormalizedProfile`. Add a `oauth-<name>` Cargo feature that enables the
+internal `_oauth-core` feature, drop a new module under
+`crates/dx-auth/src/oauth/<name>.rs` mirroring `github.rs`, then
+register it on the builder:
+
+```rust
+let builder = builder.oauth_provider(GoogleProvider::from_env()?.unwrap());
+```
+
+`install` mounts `/auth/<name>/login` + `/auth/<name>/callback` for every
+registered provider automatically.
 
 `examples/basic/` shows the complete shape, including the ProfileCard,
 ForgotPassword / ResetPassword / VerifyEmail pages, and the MFA setup
@@ -68,7 +98,7 @@ default = ["server", "ui", "sqlite", "oauth-github", "mfa", "mail", "ratelimit"]
 | `ui`           | The catalog UI components (`LoginPanel`, `Button`, `Card`, `Input`, etc.).    |
 | `sqlite`       | Use `sqlx::SqlitePool` as the storage backend. **Mutually exclusive with `postgres`.** |
 | `postgres`     | Use `sqlx::PgPool` as the storage backend. **Mutually exclusive with `sqlite`.**       |
-| `oauth-github` | GitHub OAuth client + `/auth/github/login` + `/auth/github/callback`.         |
+| `oauth-github` | GitHub OAuth provider impl. Implies the internal `_oauth-core` feature, which pulls in the `oauth2` + `reqwest` deps and gates the generic `OAuthProvider` trait, `OAuthRegistry`, and the `/auth/{provider}/login`+`/callback` axum handlers shared by every provider. |
 | `mfa`          | TOTP enrollment + verification, recovery codes, MFA challenge step in sign-in. |
 | `mail`         | The `Mailer` (SMTP + dev `.eml` fallback) and the email-verification / password-reset endpoints. Without `mail`, sign-up auto-marks accounts verified. |
 | `ratelimit`    | Per-IP rate limiter via `tower_governor`.                                     |
@@ -99,7 +129,7 @@ isn't present.
 | `GITHUB_CLIENT_SECRET` | _(unset)_                                     | OAuth App Client Secret. |
 | `GITHUB_REDIRECT_URL`  | `http://localhost:8080/auth/github/callback`  | Must exactly match the GitHub OAuth App's "Authorization callback URL". |
 
-`OAuthClients::from_env(pool)` returns `Ok(None)` when either required
+`GithubProvider::from_env()` returns `Ok(None)` when either required
 var is missing/empty, in which case the GitHub routes aren't
 registered and `available_providers` returns an empty list.
 
@@ -209,13 +239,15 @@ Apps can emit their own events too — call
 │   │   └── postgres/
 │   └── src/
 │       ├── lib.rs                   public surface
-│       ├── auth.rs                  User + password / OAuth / MFA helpers
+│       ├── auth.rs                  User + password / MFA helpers
+│       ├── oauth.rs                 OAuthProvider trait + registry + generic axum handlers
+│       ├── oauth/github.rs          GitHub provider impl (oauth-github feature)
 │       ├── mail.rs                  Mailer + templates
-│       ├── server.rs                server fns + axum OAuth handlers
+│       ├── server.rs                Dioxus server fns
 │       ├── pool.rs                  cfg-gated Pool / SessionPool aliases
 │       ├── config.rs                AuthConfig + builder
 │       ├── install.rs               dx_auth::install(router, cfg)
-│       ├── wire.rs                  LoginOutcome, UserProfile, etc.
+│       ├── wire.rs                  LoginOutcome, UserProfile, ProviderInfo, etc.
 │       └── ui/
 │           ├── login_panel/         the reusable login card
 │           └── components/          catalog widgets (button, card, etc.)

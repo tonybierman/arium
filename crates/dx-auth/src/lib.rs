@@ -6,7 +6,12 @@
 //! Typical usage:
 //!
 //! ```rust,ignore
-//! use dx_auth::{AuthConfig, Mailer, auth::OAuthClients, server::*, ui::LoginPanel};
+//! use dx_auth::{
+//!     AuthConfig, Mailer,
+//!     oauth::{github::GithubProvider, OAuthRegistry},
+//!     server::*,
+//!     ui::LoginPanel,
+//! };
 //!
 //! dioxus::serve(|| async {
 //!     let pool = sqlx::sqlite::SqlitePoolOptions::new()
@@ -14,8 +19,13 @@
 //!         .await?;
 //!     sqlx::migrate!().run(&pool).await?;
 //!
+//!     let mut oauth = OAuthRegistry::new(pool.clone())?;
+//!     if let Some(gh) = GithubProvider::from_env()? {
+//!         oauth = oauth.with_provider(gh);
+//!     }
+//!
 //!     let cfg = AuthConfig::builder(pool.clone(), Mailer::from_env()?)
-//!         .github(OAuthClients::from_env(pool.clone())?)
+//!         .oauth(oauth)
 //!         .build();
 //!
 //!     dx_auth::install(dioxus::server::router(app), cfg).await
@@ -36,6 +46,9 @@ pub mod pool;
 
 #[cfg(feature = "server")]
 pub mod auth;
+
+#[cfg(all(feature = "server", feature = "_oauth-core"))]
+pub mod oauth;
 
 #[cfg(all(feature = "server", feature = "mail"))]
 pub mod mail;
@@ -59,7 +72,7 @@ pub use install::install;
 pub use mail::Mailer;
 
 // Wire-types re-exported at the crate root for ergonomics.
-pub use wire::{LoginOutcome, MfaSetupView, MfaStatusView, ProviderId, UserProfile};
+pub use wire::{LoginOutcome, MfaSetupView, MfaStatusView, ProviderInfo, UserProfile};
 
 /// Extract just the human-readable message from a server-fn error captured
 /// on the client. The `CapturedError` Display wraps the original

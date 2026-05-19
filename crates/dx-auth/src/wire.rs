@@ -15,12 +15,23 @@ pub enum LoginOutcome {
     MfaRequired,
 }
 
-/// Third-party identity providers the server knows how to handle. Each
-/// entry returned by the `available_providers` server fn gets mapped to a
-/// `LoginProvider` button on the client.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProviderId {
-    Github,
+/// One third-party identity provider the server has credentials for and is
+/// willing to mount routes for. Returned by `available_providers` so the
+/// client can render a button per entry without needing to know which
+/// provider features were compiled in.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderInfo {
+    /// Machine name (e.g. `"github"`). Matches the route segment in
+    /// `login_url` and the `provider` column in `oauth_accounts`.
+    pub name: String,
+    /// Human-readable label for the sign-in button (e.g. `"GitHub"`).
+    pub display_name: String,
+    /// Full path the client should navigate to in order to start the
+    /// OAuth dance (e.g. `"/auth/github/login"`).
+    pub login_url: String,
+    /// Optional inline SVG for the button icon. `None` when the provider
+    /// implementation doesn't supply one.
+    pub icon_svg: Option<String>,
 }
 
 /// Profile fields safe to expose to the client.

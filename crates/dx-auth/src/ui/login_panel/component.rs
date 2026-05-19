@@ -21,11 +21,25 @@ struct Styles;
 ///
 /// `href` is the server-side route that starts the OAuth dance (e.g. `/auth/github/login`).
 /// `icon_svg` is optional inline SVG markup; pass `None` for a text-only button.
+///
+/// Fields are owned `String`s so server-driven provider lists (returned by
+/// [`crate::server::available_providers`]) can be mapped directly without
+/// `String::leak`ing.
 #[derive(Clone, PartialEq)]
 pub struct LoginProvider {
-    pub name: &'static str,
-    pub href: &'static str,
-    pub icon_svg: Option<&'static str>,
+    pub name: String,
+    pub href: String,
+    pub icon_svg: Option<String>,
+}
+
+impl From<crate::wire::ProviderInfo> for LoginProvider {
+    fn from(info: crate::wire::ProviderInfo) -> Self {
+        Self {
+            name: info.display_name,
+            href: info.login_url,
+            icon_svg: info.icon_svg,
+        }
+    }
 }
 
 /// Which mode the email/password form is in. Drives title, submit label, and whether the
@@ -248,9 +262,9 @@ pub fn LoginPanel(
                     for provider in providers.iter() {
                         ProviderLink {
                             key: "{provider.name}",
-                            name: provider.name,
-                            href: provider.href,
-                            icon_svg: provider.icon_svg,
+                            name: provider.name.clone(),
+                            href: provider.href.clone(),
+                            icon_svg: provider.icon_svg.clone(),
                         }
                     }
                 }
@@ -261,9 +275,9 @@ pub fn LoginPanel(
 
 #[component]
 fn ProviderLink(
-    name: &'static str,
-    href: &'static str,
-    icon_svg: Option<&'static str>,
+    name: String,
+    href: String,
+    icon_svg: Option<String>,
 ) -> Element {
     rsx! {
         a {

@@ -1,13 +1,16 @@
-//! All `dx-auth` server fns and the axum-level GitHub OAuth handlers.
+//! All `dx-auth` server fns.
 //!
 //! Consumers do `use dx_auth::server::*;` once at the top of their app so the
 //! Dioxus `#[post(...)]` / `#[get(...)]` macro registrations link, then the
 //! existing client-side call sites (`login_with_password(...).await`) just
 //! work.
+//!
+//! The axum-level OAuth handlers (which aren't Dioxus server fns) live in
+//! [`crate::oauth`] and are mounted by [`crate::install`].
 
 use dioxus::prelude::*;
 
-use crate::wire::{LoginOutcome, ProviderId, UserProfile};
+use crate::wire::{LoginOutcome, ProviderInfo, UserProfile};
 #[cfg(feature = "mfa")]
 use crate::wire::{MfaSetupView, MfaStatusView};
 
@@ -21,7 +24,11 @@ pub(crate) type DbExtension = axum::Extension<crate::pool::Pool>;
 pub(crate) type MailExtension = axum::Extension<crate::mail::Mailer>;
 
 #[cfg(feature = "server")]
-pub(crate) type SessionStore = axum_session::Session<crate::pool::SessionPool>;
+pub(crate) type ProvidersExtension =
+    axum::Extension<std::sync::Arc<Vec<crate::wire::ProviderInfo>>>;
+
+#[cfg(feature = "server")]
+pub type SessionStore = axum_session::Session<crate::pool::SessionPool>;
 
 /// Bundle of audit-relevant request info pulled out by the extractor
 /// below. Server fns consume this and pass it through to
@@ -177,22 +184,11 @@ pub async fn get_current_user_profile() -> Result<UserProfile> {
 }
 
 /// Which third-party providers the server has credentials configured for.
-/// The UI uses this to decide which provider buttons to render.
-#[get("/api/auth/providers")]
-pub async fn available_providers() -> Result<Vec<ProviderId>> {
-    let mut providers = Vec::new();
-    let id_set = std::env::var("GITHUB_CLIENT_ID")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .is_some();
-    let secret_set = std::env::var("GITHUB_CLIENT_SECRET")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .is_some();
-    if id_set && secret_set {
-        providers.push(ProviderId::Github);
-    }
-    Ok(providers)
+/// The UI uses this to decide which provider buttons to render. Order is
+/// preserved from registration order on the [`OAuthRegistry`].
+#[get("/api/auth/providers", providers: ProvidersExtension)]
+pub async fn available_providers() -> Result<Vec<ProviderInfo>> {
+    Ok((*providers.0).clone())
 }
 
 // ============================================================
@@ -590,186 +586,6 @@ pub async fn get_mfa_status() -> Result<MfaStatusView> {
         auth::MfaStatus::Pending => MfaStatusView::Pending,
         auth::MfaStatus::Enabled => MfaStatusView::Enabled,
     })
-}
-
-// ============================================================
-// GitHub OAuth (axum handlers — not Dioxus server fns)
-// ============================================================
-
-#[cfg(all(feature = "server", feature = "oauth-github"))]
-use crate::auth::OAuthClients;
-
-#[cfg(all(feature = "server", feature = "oauth-github"))]
-#[derive(serde::Deserialize)]
-pub(crate) struct GithubCallbackParams {
-    code: String,
-    state: String,
-}
-
-#[cfg(all(feature = "server", feature = "oauth-github"))]
-#[derive(serde::Deserialize)]
-struct GithubUserInfo {
-    id: u64,
-    login: String,
-    name: Option<String>,
-    email: Option<String>,
-    avatar_url: Option<String>,
-    html_url: Option<String>,
-}
-
-#[cfg(all(feature = "server", feature = "oauth-github"))]
-fn github_basic_client(
-    clients: &OAuthClients,
-) -> anyhow::Result<
-    oauth2::basic::BasicClient<
-        oauth2::EndpointSet,
-        oauth2::EndpointNotSet,
-        oauth2::EndpointNotSet,
-        oauth2::EndpointNotSet,
-        oauth2::EndpointSet,
-    >,
-> {
-    use oauth2::basic::BasicClient;
-    use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
-
-    Ok(
-        BasicClient::new(ClientId::new(clients.github_client_id.clone()))
-            .set_client_secret(ClientSecret::new(clients.github_client_secret.clone()))
-            .set_auth_uri(AuthUrl::new(
-                "https://github.com/login/oauth/authorize".to_string(),
-            )?)
-            .set_token_uri(TokenUrl::new(
-                "https://github.com/login/oauth/access_token".to_string(),
-            )?)
-            .set_redirect_uri(RedirectUrl::new(clients.github_redirect_url.clone())?),
-    )
-}
-
-#[cfg(all(feature = "server", feature = "oauth-github"))]
-fn http_err<E: std::fmt::Display>(
-    status: axum::http::StatusCode,
-    e: E,
-) -> (axum::http::StatusCode, String) {
-    (status, e.to_string())
-}
-
-#[cfg(all(feature = "server", feature = "oauth-github"))]
-pub(crate) async fn github_login(
-    axum::extract::State(clients): axum::extract::State<OAuthClients>,
-    session: SessionStore,
-) -> Result<axum::response::Redirect, (axum::http::StatusCode, String)> {
-    use oauth2::{CsrfToken, Scope};
-
-    let client = github_basic_client(&clients)
-        .map_err(|e| http_err(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    let (auth_url, csrf_state) = client
-        .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new("read:user".to_string()))
-        .add_scope(Scope::new("user:email".to_string()))
-        .url();
-
-    session.set("gh_oauth_state", csrf_state.secret().to_string());
-
-    Ok(axum::response::Redirect::to(auth_url.as_ref()))
-}
-
-#[cfg(all(feature = "server", feature = "oauth-github"))]
-pub(crate) async fn github_callback(
-    axum::extract::State(clients): axum::extract::State<OAuthClients>,
-    session: SessionStore,
-    auth_session: auth::Session,
-    audit: AuditCtx,
-    axum::extract::Query(params): axum::extract::Query<GithubCallbackParams>,
-) -> Result<axum::response::Redirect, (axum::http::StatusCode, String)> {
-    use oauth2::{AuthorizationCode, TokenResponse};
-
-    let expected_state: Option<String> = session.get("gh_oauth_state");
-    session.remove("gh_oauth_state");
-
-    let expected = expected_state.ok_or_else(|| {
-        http_err(
-            axum::http::StatusCode::BAD_REQUEST,
-            "missing oauth state in session",
-        )
-    })?;
-
-    if expected != params.state {
-        return Err(http_err(
-            axum::http::StatusCode::BAD_REQUEST,
-            "oauth state mismatch",
-        ));
-    }
-
-    let client = github_basic_client(&clients)
-        .map_err(|e| http_err(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    let token = client
-        .exchange_code(AuthorizationCode::new(params.code))
-        .request_async(&clients.http)
-        .await
-        .map_err(|e| {
-            http_err(
-                axum::http::StatusCode::BAD_GATEWAY,
-                format!("token exchange failed: {e}"),
-            )
-        })?;
-
-    let info: GithubUserInfo = clients
-        .http
-        .get("https://api.github.com/user")
-        .header("User-Agent", "dx-auth")
-        .header("Accept", "application/vnd.github+json")
-        .bearer_auth(token.access_token().secret())
-        .send()
-        .await
-        .map_err(|e| {
-            http_err(
-                axum::http::StatusCode::BAD_GATEWAY,
-                format!("github api request failed: {e}"),
-            )
-        })?
-        .error_for_status()
-        .map_err(|e| {
-            http_err(
-                axum::http::StatusCode::BAD_GATEWAY,
-                format!("github api status: {e}"),
-            )
-        })?
-        .json()
-        .await
-        .map_err(|e| {
-            http_err(
-                axum::http::StatusCode::BAD_GATEWAY,
-                format!("github api parse: {e}"),
-            )
-        })?;
-
-    let profile = auth::GithubProfile {
-        id: info.id,
-        login: &info.login,
-        name: info.name.as_deref(),
-        email: info.email.as_deref(),
-        avatar_url: info.avatar_url.as_deref(),
-        html_url: info.html_url.as_deref(),
-    };
-
-    let user_id = auth::upsert_github_user(&clients.db, profile)
-        .await
-        .map_err(|e| http_err(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    auth_session.login_user(user_id);
-    audit
-        .record(
-            &clients.db,
-            auth::audit::USER_LOGIN_SUCCESS,
-            Some(user_id),
-            Some(user_id),
-            Some("{\"method\":\"oauth\",\"provider\":\"github\"}"),
-        )
-        .await;
-
-    Ok(axum::response::Redirect::to("/"))
 }
 
 // ============================================================

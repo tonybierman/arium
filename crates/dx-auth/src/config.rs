@@ -2,7 +2,7 @@
 //!
 //! Built explicitly via the [`AuthConfig::builder`] entry point — env-var
 //! parsing only happens inside the optional convenience constructors that
-//! consumers can opt into (e.g. `Mailer::from_env`, `OAuthClients::from_env`).
+//! consumers can opt into (e.g. `Mailer::from_env`, `GithubProvider::from_env`).
 
 #![cfg(feature = "server")]
 
@@ -13,8 +13,8 @@ use crate::pool::Pool;
 #[cfg(feature = "mail")]
 use crate::mail::Mailer;
 
-#[cfg(feature = "oauth-github")]
-use crate::auth::OAuthClients;
+#[cfg(feature = "_oauth-core")]
+use crate::oauth::{OAuthProvider, OAuthRegistry};
 
 /// Rate-limit settings applied to the entire router. See [`crate::install`].
 #[cfg(feature = "ratelimit")]
@@ -65,8 +65,8 @@ pub struct AuthConfig {
     pub(crate) pool: Pool,
     #[cfg(feature = "mail")]
     pub(crate) mailer: Mailer,
-    #[cfg(feature = "oauth-github")]
-    pub(crate) github_oauth: Option<OAuthClients>,
+    #[cfg(feature = "_oauth-core")]
+    pub(crate) oauth: OAuthRegistry,
     pub(crate) session_lifetime: Duration,
     pub(crate) session_max_lifetime: Duration,
     pub(crate) cookie_max_age: Duration,
@@ -84,8 +84,8 @@ impl AuthConfig {
         AuthConfigBuilder {
             pool,
             mailer,
-            #[cfg(feature = "oauth-github")]
-            github_oauth: None,
+            #[cfg(feature = "_oauth-core")]
+            oauth: None,
             session_lifetime: Duration::hours(2),
             session_max_lifetime: Duration::days(30),
             cookie_max_age: Duration::days(30),
@@ -100,8 +100,8 @@ impl AuthConfig {
     pub fn builder(pool: Pool) -> AuthConfigBuilder {
         AuthConfigBuilder {
             pool,
-            #[cfg(feature = "oauth-github")]
-            github_oauth: None,
+            #[cfg(feature = "_oauth-core")]
+            oauth: None,
             session_lifetime: Duration::hours(2),
             session_max_lifetime: Duration::days(30),
             cookie_max_age: Duration::days(30),
@@ -118,8 +118,8 @@ pub struct AuthConfigBuilder {
     pool: Pool,
     #[cfg(feature = "mail")]
     mailer: Mailer,
-    #[cfg(feature = "oauth-github")]
-    github_oauth: Option<OAuthClients>,
+    #[cfg(feature = "_oauth-core")]
+    oauth: Option<OAuthRegistry>,
     session_lifetime: Duration,
     session_max_lifetime: Duration,
     cookie_max_age: Duration,
@@ -130,11 +130,34 @@ pub struct AuthConfigBuilder {
 }
 
 impl AuthConfigBuilder {
-    /// Attach a configured GitHub OAuth client. Pass `None` to leave the
-    /// `/auth/github/*` routes unregistered (the LoginPanel hides the button).
-    #[cfg(feature = "oauth-github")]
-    pub fn github(mut self, github_oauth: Option<OAuthClients>) -> Self {
-        self.github_oauth = github_oauth;
+    /// Attach a fully-built OAuth registry (typically one constructed with
+    /// `OAuthRegistry::new(pool.clone())?.with_provider(GithubProvider::from_env()?.unwrap())`).
+    ///
+    /// Replaces any previously-set registry. For one-off provider registration
+    /// see [`Self::oauth_provider`].
+    #[cfg(feature = "_oauth-core")]
+    pub fn oauth(mut self, registry: OAuthRegistry) -> Self {
+        self.oauth = Some(registry);
+        self
+    }
+
+    /// Append a single provider, lazily initialising the registry on first
+    /// call. Convenient when registering one provider at a time:
+    ///
+    /// ```rust,ignore
+    /// let mut builder = AuthConfig::builder(pool, mailer);
+    /// if let Some(gh) = GithubProvider::from_env()? {
+    ///     builder = builder.oauth_provider(gh);
+    /// }
+    /// ```
+    #[cfg(feature = "_oauth-core")]
+    pub fn oauth_provider<P: OAuthProvider>(mut self, provider: P) -> Self {
+        let reg = match self.oauth.take() {
+            Some(r) => r,
+            None => OAuthRegistry::new(self.pool.clone())
+                .expect("default reqwest::Client builds with redirect policy only"),
+        };
+        self.oauth = Some(reg.with_provider(provider));
         self
     }
 
@@ -182,12 +205,17 @@ impl AuthConfigBuilder {
     }
 
     pub fn build(self) -> AuthConfig {
+        #[cfg(feature = "_oauth-core")]
+        let oauth = self.oauth.unwrap_or_else(|| {
+            OAuthRegistry::new(self.pool.clone())
+                .expect("default reqwest::Client builds with redirect policy only")
+        });
         AuthConfig {
             pool: self.pool,
             #[cfg(feature = "mail")]
             mailer: self.mailer,
-            #[cfg(feature = "oauth-github")]
-            github_oauth: self.github_oauth,
+            #[cfg(feature = "_oauth-core")]
+            oauth,
             session_lifetime: self.session_lifetime,
             session_max_lifetime: self.session_max_lifetime,
             cookie_max_age: self.cookie_max_age,

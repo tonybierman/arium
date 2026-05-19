@@ -15,20 +15,19 @@ use crate::pool::SessionPool;
 use crate::auth::AuthLayer;
 use crate::config::AuthConfig;
 
-#[cfg(feature = "oauth-github")]
-use crate::server::{github_callback, github_login};
-
 /// Attach all dx-auth wiring to `router` and return the augmented Router.
 ///
 /// What this does, in order:
 ///
-/// 1. Merges the `/auth/github/login` + `/auth/github/callback` subrouter
-///    when [`AuthConfig::github`](crate::AuthConfig) is `Some`.
+/// 1. Mounts `/auth/{provider}/login` + `/auth/{provider}/callback` routes for
+///    every provider registered on the config's [`OAuthRegistry`]. With no
+///    providers (or when `_oauth-core` is off) this is a no-op.
 /// 2. Layers a per-IP rate limiter (when configured) using a key extractor
 ///    that gracefully falls back to a fixed sentinel address if no IP source
 ///    is available (so the first request under `dx serve` doesn't 500).
-/// 3. Adds `axum::Extension`s for the [`Pool`](crate::pool::Pool) and
-///    [`Mailer`](crate::Mailer) so server fns can reach them.
+/// 3. Adds `axum::Extension`s for the [`Pool`](crate::pool::Pool), the list
+///    of `ProviderInfo` available_providers serves, and the
+///    [`Mailer`](crate::Mailer).
 /// 4. Adds the `axum_session_auth::AuthSessionLayer` with the anonymous Guest
 ///    user (`id = 1`).
 /// 5. Adds the `axum_session::SessionLayer` with cookie / lifetime settings
@@ -42,15 +41,37 @@ pub async fn install(router: Router, cfg: AuthConfig) -> anyhow::Result<Router> 
     // and `maybe_grant_first_admin` (first-user-wins).
     crate::auth::sync_bootstrap_admin(&cfg.pool).await?;
 
-    // 1) GitHub OAuth routes, opt-in (compiled out without `oauth-github`).
-    #[cfg(feature = "oauth-github")]
-    if let Some(clients) = cfg.github_oauth.clone() {
-        let oauth_router = Router::new()
-            .route("/auth/github/login", axum::routing::get(github_login))
-            .route("/auth/github/callback", axum::routing::get(github_callback))
-            .with_state(clients);
-        router = router.merge(oauth_router);
-    }
+    // 1) OAuth provider routes. One pair per registered provider; the registry
+    //    drives both the route table and the `available_providers` response.
+    #[cfg(feature = "_oauth-core")]
+    let provider_infos: Vec<crate::wire::ProviderInfo> = {
+        let mut infos = Vec::new();
+        if !cfg.oauth.is_empty() {
+            let oauth_router = Router::new()
+                .route(
+                    "/auth/{provider}/login",
+                    axum::routing::get(crate::oauth::oauth_login),
+                )
+                .route(
+                    "/auth/{provider}/callback",
+                    axum::routing::get(crate::oauth::oauth_callback),
+                )
+                .with_state(cfg.oauth.clone());
+            router = router.merge(oauth_router);
+
+            for p in cfg.oauth.list() {
+                infos.push(crate::wire::ProviderInfo {
+                    name: p.name().to_string(),
+                    display_name: p.display_name().to_string(),
+                    login_url: format!("/auth/{}/login", p.name()),
+                    icon_svg: p.icon_svg().map(|s| s.to_string()),
+                });
+            }
+        }
+        infos
+    };
+    #[cfg(not(feature = "_oauth-core"))]
+    let provider_infos: Vec<crate::wire::ProviderInfo> = Vec::new();
 
     // 2) Rate limit (compiled out without `ratelimit`).
     #[cfg(feature = "ratelimit")]
@@ -76,6 +97,7 @@ pub async fn install(router: Router, cfg: AuthConfig) -> anyhow::Result<Router> 
     // 3) Extensions visible to all server fns.
     router = router.layer(axum::Extension(cfg.pool.clone()));
     router = router.layer(axum::Extension(cfg.audit.clone()));
+    router = router.layer(axum::Extension(std::sync::Arc::new(provider_infos)));
     #[cfg(feature = "mail")]
     {
         router = router.layer(axum::Extension(cfg.mailer.clone()));
