@@ -6,4 +6,9 @@
 pub mod components;
 pub mod login_panel;
 
+pub mod account;
+pub mod admin;
+
+pub use account::AccountSettings;
+pub use admin::{AdminUserDetail, AdminUserList};
 pub use login_panel::{LoginPanel, LoginProvider, LoginSubmit, SubmitKind};
