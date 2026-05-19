@@ -1,0 +1,12 @@
+[package]
+name = "dx-auth"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Reusable authentication library for Dioxus 0.7 fullstack apps."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Placeholders — real deps land in Step 2 when the modules move.
