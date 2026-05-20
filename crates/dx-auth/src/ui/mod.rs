@@ -15,6 +15,7 @@ pub mod account;
 pub mod admin;
 #[cfg(feature = "mail")]
 pub mod forgot_password;
+pub mod oauth_providers;
 pub mod permissions;
 pub mod require_auth;
 #[cfg(feature = "mail")]
@@ -26,6 +27,7 @@ pub use admin::{AdminRoleEditor, AdminRoleList, AdminUserDetail, AdminUserList, 
 #[cfg(feature = "mail")]
 pub use forgot_password::ForgotPassword;
 pub use login_panel::{LoginPanel, LoginProvider, LoginSubmit, SubmitKind};
+pub use oauth_providers::{use_oauth_providers, OAuthProvidersProvider};
 pub use permissions::{
     use_permissions, PermissionGate, PermissionSet, PermissionsProvider, Policy,
     RequirePermission, UsePermissions,

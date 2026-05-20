@@ -464,6 +464,46 @@ Apps can emit their own events too — call
   it's been applied, sqlx refuses to start until you wipe the DB or add
   a new migration file with the fix-up.
 
+## OAuth provider list
+
+The `providers` prop on `LoginPanel` takes a `Vec<LoginProvider>` describing
+the third-party sign-in buttons to render. To avoid re-fetching the list
+on every `LoginPanel` mount — and to keep it cached across login/logout
+cycles where the panel comes in and out of the tree — fetch it once at
+the app root with `OAuthProvidersProvider`, then read it anywhere with
+`use_oauth_providers()`:
+
+```rust
+use dx_auth::ui::{
+    use_oauth_providers, LoginPanel, OAuthProvidersProvider, PermissionsProvider,
+};
+
+fn app() -> Element {
+    rsx! {
+        PermissionsProvider {
+            OAuthProvidersProvider {
+                Router::<Route> {}
+            }
+        }
+    }
+}
+
+#[component]
+fn LoginScreen() -> Element {
+    let providers = use_oauth_providers();
+    rsx! {
+        LoginPanel {
+            providers,
+            on_submit: /* … */,
+        }
+    }
+}
+```
+
+`use_oauth_providers()` returns an empty `Vec` if the provider isn't in
+scope or the fetch hasn't resolved yet — `LoginPanel` simply hides the
+provider section in that case, so there's no flicker.
+
 ## Drop-in auth routes
 
 `LoginPanel` is one of four ready-made screen components. The other three

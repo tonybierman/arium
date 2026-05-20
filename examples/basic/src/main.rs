@@ -17,8 +17,9 @@ use dx_auth::ui::components::input::Input;
 use dx_auth::ui::components::label::Label;
 use dx_auth::ui::components::tabs::{TabContent, TabList, TabTrigger, Tabs};
 use dx_auth::ui::{
-    use_permissions, ForgotPassword, LoginPanel, LoginProvider, LoginSubmit, PermissionGate,
-    PermissionsProvider, Policy, RequirePermission, ResetPassword, SubmitKind, VerifyEmail,
+    use_oauth_providers, use_permissions, ForgotPassword, LoginPanel, LoginSubmit,
+    OAuthProvidersProvider, PermissionGate, PermissionsProvider, Policy, RequirePermission,
+    ResetPassword, SubmitKind, VerifyEmail,
 };
 use dx_auth::{friendly_server_error, LoginOutcome, MfaSetupView, MfaStatusView, UserProfile};
 
@@ -116,7 +117,9 @@ fn app() -> Element {
         }
 
         PermissionsProvider {
-            Router::<Route> {}
+            OAuthProvidersProvider {
+                Router::<Route> {}
+            }
         }
     }
 }
@@ -126,13 +129,12 @@ fn Home() -> Element {
     let perms = use_permissions();
     let mut logout = use_action(logout);
 
-    let providers_resource = use_resource(available_providers);
-    let providers: Vec<LoginProvider> = providers_resource()
-        .and_then(|r| r.ok())
-        .unwrap_or_default()
-        .into_iter()
-        .map(LoginProvider::from)
-        .collect();
+    // Provider list comes from a single use_resource at the app root via
+    // OAuthProvidersProvider — using use_resource here too would re-fire
+    // (and briefly return empty) every time the LoginPanel branch
+    // unmounts and re-mounts during the login/logout transition, leaving
+    // the GitHub button missing right after sign-out.
+    let providers = use_oauth_providers();
 
     let current: UserProfile = perms.profile().unwrap_or_default();
     let logged_in = current.is_authenticated;
