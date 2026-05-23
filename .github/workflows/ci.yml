@@ -60,15 +60,9 @@ jobs:
             --no-default-features \
             --features "${{ matrix.features }}"
 
-  # ---------------------------------------------------------------
-  # Advisory job — doesn't gate merges. The repo isn't fmt-clean today;
-  # flip `continue-on-error: false` once it is.
-  # ---------------------------------------------------------------
-
   fmt:
-    name: cargo fmt (advisory)
+    name: cargo fmt
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

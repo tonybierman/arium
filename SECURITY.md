@@ -101,13 +101,9 @@ Gating (a failure blocks the merge):
   repo + history. Invoked via the official binary, not the
   marketplace action (the action's license check is flaky for
   personal accounts). Allowlist lives in [`.gitleaks.toml`](.gitleaks.toml).
+- `cargo fmt --check` — formatting.
 - `cargo test` and a `cargo check` matrix across realistic feature
   combinations.
-
-Advisory (`continue-on-error: true` — a failure shows red on the job
-but doesn't block):
-
-- `cargo fmt --check` — formatting.
 
 **Nightly — `.github/workflows/nightly.yml`**
 
