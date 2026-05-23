@@ -1,4 +1,4 @@
-# dx-auth
+# Dioxus Full Stack Authentication
 
 Reusable authentication library for [Dioxus 0.7](https://dioxuslabs.com)
 fullstack apps. Provides:
