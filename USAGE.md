@@ -124,7 +124,7 @@ session-driven flow. Wire them into your `Route` enum:
 
 ```rust
 use dx_auth::ui::{
-    ForgotPassword, LoginPanel, MfaChallenge, MfaSetup, ResetPassword, VerifyEmail,
+    ApiTokens, ForgotPassword, LoginPanel, MfaChallenge, MfaSetup, ResetPassword, VerifyEmail,
 };
 
 #[derive(Routable, Clone, PartialEq)]
@@ -134,6 +134,7 @@ pub enum Route {
     #[route("/auth/reset?:token")] ResetPassword { token: String },
     #[route("/auth/verify?:token")] VerifyEmail { token: String },
     #[route("/account/mfa")]       MfaSetup,
+    #[route("/account/tokens")]    ApiTokens,
     // ... your domain routes
 }
 ```
@@ -153,6 +154,7 @@ Each screen calls its corresponding server fn under the hood:
 | `VerifyEmail { token }` | `verify_email` | Fires on mount; renders pending / verified / expired states. |
 | `MfaChallenge` | `verify_login_mfa` | Post-password 6-digit prompt with recovery-code toggle. |
 | `MfaSetup` | `begin/confirm/disable_mfa_setup`, `get_mfa_status` | Enrollment + management screen for `/account/mfa`. |
+| `ApiTokens` | `create_api_token`, `list_api_tokens`, `revoke_api_token` | Personal-token management. Cleartext shown once at creation; only prefix + SHA-256 hash are persisted. See "API tokens" below for the validation contract. |
 
 All components accept overridable `title` / `description` / `back_href`
 props for copy customization.
@@ -234,6 +236,80 @@ let builder = builder.oauth_provider(GoogleProvider::from_env()?.unwrap());
 
 `install` mounts `/auth/<name>/login` + `/auth/<name>/callback` for
 every registered provider automatically.
+
+## API tokens
+
+The `tokens` feature (default on) ships an `api_keys` table, the
+`ApiTokens` drop-in, and three server fns (`create_api_token`,
+`list_api_tokens`, `revoke_api_token`) so users can self-manage
+personal tokens for CLI tools, MCP servers, and other programmatic
+clients that can't carry a session cookie.
+
+### What's persisted
+
+- `name` — user-supplied label
+- `prefix` — first 9 chars of the cleartext (`dxsk_abcd`), shown in the
+  list UI for visual disambiguation
+- `token_hash` — SHA-256 hex of the cleartext (64 chars)
+- `created_at`, `last_used_at`, `revoked_at`
+
+The cleartext secret is returned **once** in the response from
+`create_api_token` and never recoverable from the server. Lost tokens
+have to be revoked and replaced.
+
+### Validating an incoming token
+
+The library doesn't ship a Bearer-token axum extractor — consumers do
+the lookup themselves, which keeps the auth path explicit. Hash the
+incoming bearer string with [`dx_auth::auth::tokens::hash_api_token`]
+and look it up:
+
+```rust
+use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
+use dx_auth::auth::tokens::hash_api_token;
+
+pub async fn require_api_token(
+    db: axum::Extension<sqlx::SqlitePool>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let header = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let hash = hash_api_token(header);
+
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT user_id FROM api_keys \
+         WHERE token_hash = $1 AND revoked_at IS NULL",
+    )
+    .bind(&hash)
+    .fetch_optional(&db.0)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let Some((user_id,)) = row else {
+        return Err(StatusCode::UNAUTHORIZED);
+    };
+
+    // Best-effort `last_used_at` bump — failures here don't fail the request.
+    let _ = sqlx::query("UPDATE api_keys SET last_used_at = strftime('%s','now') WHERE token_hash = $1")
+        .bind(&hash)
+        .execute(&db.0)
+        .await;
+
+    req.extensions_mut().insert(user_id);
+    Ok(next.run(req).await)
+}
+```
+
+Bumping `last_used_at` is the consumer's responsibility — the library
+only writes it via the consumer-supplied middleware above (or whatever
+equivalent path you use). `dx_auth::ui::ApiTokens` reads it back so
+users can spot stale tokens.
 
 ## Writing server fns that read the current user
 
@@ -411,6 +487,7 @@ default = ["server", "ui", "sqlite", "oauth-github", "mfa", "mail", "ratelimit"]
 | `mfa`          | TOTP enrollment + verification, recovery codes, MFA challenge step. Includes `MfaChallenge` / `MfaSetup` UI. |
 | `mail`         | `Mailer` (SMTP + dev `.eml` fallback) and email-verification / password-reset endpoints + UI. Without `mail`, signup auto-marks accounts verified. |
 | `ratelimit`    | Per-IP rate limiter via `tower_governor`. |
+| `tokens`       | Personal API tokens (`ApiTokens` UI + `create/list/revoke` server fns + `hash_api_token` helper). Pulls in `sha2`. |
 
 Examples:
 
@@ -503,6 +580,8 @@ handle cleanup).
 | `user.password_reset.consumed` | Reset link followed and a new password set. |
 | `user.mfa.enabled` | TOTP enrollment confirmed. |
 | `user.mfa.disabled` | TOTP turned off. |
+| `user.api_token.created` | New API token issued. `details` carries `name` + `prefix`. |
+| `user.api_token.revoked` | Token soft-revoked. `details` carries `token_id`. |
 | `account.display_name_changed` | Self-service display name edit. |
 | `account.password_changed` | Self-service password rotation. |
 | `account.self_deleted` | User soft-deletes their own account. |
@@ -524,9 +603,9 @@ dx_auth::auth::audit::record(&pool, RecordInput { /* event_type, details, … */
   `mfa_recovery_codes`, `audit_events`, `roles`, `user_roles`, `api_keys`.
 - Sign-in / sign-up / OAuth / verification / reset / MFA server fns.
 - Drop-in screens: `LoginPanel`, `ForgotPassword`, `ResetPassword`,
-  `VerifyEmail`, `MfaChallenge`, `MfaSetup`, `AccountSettings`,
-  `AdminUserList` / `AdminUserDetail` / `AdminRoleList` /
-  `AdminRoleEditor` / `AuditLog`.
+  `VerifyEmail`, `MfaChallenge`, `MfaSetup`, `ApiTokens`,
+  `AccountSettings`, `AdminUserList` / `AdminUserDetail` /
+  `AdminRoleList` / `AdminRoleEditor` / `AuditLog`.
 - Client RBAC primitives: `PermissionsProvider`, `use_permissions`,
   `PermissionGate`, `RequirePermission`, `RequireAuth`, `Policy`.
 
@@ -586,37 +665,6 @@ feature set you ship.
 column — two `foo@x.com` / `foo@y.com` accounts both get `foo`. If
 your domain has a "lookup by username" path, prefer email-based lookup
 for any feature where selecting the wrong user matters.
-
-## Repo layout
-
-```
-.
-├── crates/dx-auth/
-│   ├── migrations/{sqlite,postgres}/  (shipped via `dx_auth::migrator()`)
-│   └── src/
-│       ├── lib.rs                     public surface
-│       ├── auth.rs                    User + password / MFA helpers
-│       ├── oauth.rs                   OAuthProvider trait + registry
-│       ├── oauth/github.rs            GitHub provider impl
-│       ├── mail.rs                    Mailer + templates
-│       ├── server.rs                  Dioxus server fns
-│       ├── pool.rs                    cfg-gated Pool aliases
-│       ├── config.rs                  AuthConfig + builder
-│       ├── install.rs                 dx_auth::install(router, cfg)
-│       ├── wire.rs                    LoginOutcome, UserProfile, etc.
-│       └── ui/
-│           ├── login_panel/           LoginPanel
-│           ├── mfa/                   MfaChallenge + MfaSetup
-│           ├── forgot_password/       ForgotPassword
-│           ├── reset_password/        ResetPassword
-│           ├── verify_email/          VerifyEmail
-│           ├── account/               AccountSettings
-│           ├── admin/                 AdminUserList / Detail / Roles / AuditLog
-│           ├── permissions.rs         PermissionsProvider / Gate / Require / hook
-│           ├── require_auth.rs        RequireAuth
-│           └── components/            catalog widgets (button, card, …)
-└── examples/basic/                    end-to-end fullstack consumer
-```
 
 ## Dev tips
 

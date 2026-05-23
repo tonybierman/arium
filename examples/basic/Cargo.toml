@@ -22,6 +22,7 @@ dx-auth = { path = "../../crates/dx-auth", default-features = false, features = 
     "mail",
     "oauth-github",
     "ratelimit",
+    "tokens",
 ] }
 
 # Server-side deps the example still touches directly (sqlx for the pool +

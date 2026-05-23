@@ -23,6 +23,8 @@ pub mod permissions;
 pub mod require_auth;
 #[cfg(feature = "mail")]
 pub mod reset_password;
+#[cfg(feature = "tokens")]
+pub mod tokens;
 pub mod verify_email;
 
 pub use account::AccountSettings;
@@ -41,4 +43,6 @@ pub use permissions::{
 pub use require_auth::RequireAuth;
 #[cfg(feature = "mail")]
 pub use reset_password::ResetPassword;
+#[cfg(feature = "tokens")]
+pub use tokens::ApiTokens;
 pub use verify_email::VerifyEmail;

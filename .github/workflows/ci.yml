@@ -44,8 +44,9 @@ jobs:
           - "server,sqlite"
           - "server,sqlite,oauth-github"
           - "server,sqlite,mfa,mail,ratelimit"
-          - "server,sqlite,ui,oauth-github,mfa,mail,ratelimit"
-          - "server,postgres,oauth-github,mfa,mail,ratelimit"
+          - "server,sqlite,tokens"
+          - "server,sqlite,ui,oauth-github,mfa,mail,ratelimit,tokens"
+          - "server,postgres,oauth-github,mfa,mail,ratelimit,tokens"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

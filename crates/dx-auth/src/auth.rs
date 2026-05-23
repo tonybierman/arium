@@ -1180,6 +1180,9 @@ pub mod audit {
     pub const USER_MFA_ENABLED: &str = "user.mfa.enabled";
     pub const USER_MFA_DISABLED: &str = "user.mfa.disabled";
 
+    pub const USER_API_TOKEN_CREATED: &str = "user.api_token.created";
+    pub const USER_API_TOKEN_REVOKED: &str = "user.api_token.revoked";
+
     pub const ACCOUNT_PASSWORD_CHANGED: &str = "account.password_changed";
     pub const ACCOUNT_DISPLAY_NAME_CHANGED: &str = "account.display_name_changed";
     pub const ACCOUNT_SELF_DELETED: &str = "account.self_deleted";
@@ -1370,5 +1373,168 @@ pub mod audit {
         ip: Option<String>,
         user_agent: Option<String>,
         details: Option<String>,
+    }
+}
+
+// ============================================================
+// API tokens (Phase 14)
+// ============================================================
+
+/// Personal API tokens that bypass the session-cookie auth path — used by
+/// programmatic clients (CLI tools, MCP servers, …) that hold a long-lived
+/// secret per user. Cleartext is shown to the user once at creation; only
+/// the SHA-256 hex hash plus a short `prefix` for visual disambiguation are
+/// persisted.
+#[cfg(feature = "tokens")]
+pub mod tokens {
+    use super::*;
+    use crate::wire::ApiTokenView;
+
+    /// `dxsk_` + 32 random hex chars (16 bytes of entropy).
+    const TOKEN_BYTES: usize = 16;
+    const PREFIX_LEN: usize = 9; // "dxsk_" (5) + 4 hex chars
+    const TOKEN_PREFIX: &str = "dxsk_";
+    const MAX_NAME_LEN: usize = 64;
+
+    /// Generate a fresh API token. Returns `(plaintext, prefix, sha256_hex)`.
+    /// Pure / no IO so callers (and tests) can verify the contract directly.
+    pub fn generate_api_token() -> (String, String, String) {
+        use argon2::password_hash::rand_core::{OsRng, RngCore};
+        use sha2::{Digest, Sha256};
+
+        let mut bytes = [0u8; TOKEN_BYTES];
+        let mut rng = OsRng;
+        rng.fill_bytes(&mut bytes);
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+
+        let plaintext = format!("{TOKEN_PREFIX}{hex}");
+        let prefix = plaintext.chars().take(PREFIX_LEN).collect::<String>();
+
+        let mut hasher = Sha256::new();
+        hasher.update(plaintext.as_bytes());
+        let hash_hex: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+
+        (plaintext, prefix, hash_hex)
+    }
+
+    /// Hash a candidate token the same way [`generate_api_token`] does.
+    /// Consumers validating an incoming `Authorization: Bearer dxsk_…`
+    /// hash the bearer string with this and look up
+    /// `api_keys.token_hash WHERE revoked_at IS NULL`.
+    pub fn hash_api_token(plaintext: &str) -> String {
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+        hasher.update(plaintext.as_bytes());
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    /// Create a new token for `user_id`. Returns the cleartext (shown once)
+    /// plus the persisted row's view.
+    pub async fn create_for_user(
+        db: &Pool,
+        user_id: i64,
+        name: &str,
+    ) -> anyhow::Result<(String, ApiTokenView)> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow::anyhow!("Token name is required."));
+        }
+        if trimmed.chars().count() > MAX_NAME_LEN {
+            return Err(anyhow::anyhow!(
+                "Token name is too long (max {MAX_NAME_LEN} characters)."
+            ));
+        }
+
+        let (plaintext, prefix, token_hash) = generate_api_token();
+        let now = unix_now();
+
+        let (id,): (i64,) = sqlx::query_as(
+            "INSERT INTO api_keys (user_id, name, token_hash, prefix, created_at) \
+             VALUES ($1, $2, $3, $4, $5) \
+             RETURNING id",
+        )
+        .bind(user_id)
+        .bind(trimmed)
+        .bind(&token_hash)
+        .bind(&prefix)
+        .bind(now)
+        .fetch_one(db)
+        .await?;
+
+        let view = ApiTokenView {
+            id,
+            name: trimmed.to_string(),
+            prefix,
+            created_at_iso: format_unix_date(now),
+            last_used_at_iso: None,
+        };
+        Ok((plaintext, view))
+    }
+
+    /// Active (non-revoked) tokens owned by `user_id`, newest first.
+    pub async fn list_for_user(db: &Pool, user_id: i64) -> anyhow::Result<Vec<ApiTokenView>> {
+        let rows: Vec<(i64, String, String, i64, Option<i64>)> = sqlx::query_as(
+            "SELECT id, name, prefix, created_at, last_used_at \
+             FROM api_keys \
+             WHERE user_id = $1 AND revoked_at IS NULL \
+             ORDER BY created_at DESC, id DESC",
+        )
+        .bind(user_id)
+        .fetch_all(db)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(id, name, prefix, created_at, last_used_at)| ApiTokenView {
+                    id,
+                    name,
+                    prefix,
+                    created_at_iso: format_unix_date(created_at),
+                    last_used_at_iso: last_used_at.map(format_unix_date),
+                },
+            )
+            .collect())
+    }
+
+    /// Format a unix-seconds timestamp as `YYYY-MM-DD UTC`. The audit module
+    /// has a comparable helper but uses `chrono::TimeZone::timestamp_opt`;
+    /// this one is identical in behaviour but lives next to its only
+    /// caller so the dependency direction stays one-way (`tokens` doesn't
+    /// import from `audit`).
+    fn format_unix_date(secs: i64) -> String {
+        use chrono::TimeZone;
+        chrono::Utc
+            .timestamp_opt(secs, 0)
+            .single()
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| secs.to_string())
+    }
+
+    /// Soft-revoke. Returns `true` if a row was actually updated (i.e. the
+    /// token existed, was owned by `user_id`, and wasn't already revoked).
+    /// Returns `false` otherwise — callers should treat this as
+    /// `not-found-for-you` without distinguishing the two cases (no info
+    /// leak between users).
+    pub async fn revoke_for_user(db: &Pool, user_id: i64, token_id: i64) -> anyhow::Result<bool> {
+        let res = sqlx::query(
+            "UPDATE api_keys SET revoked_at = $1 \
+             WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL",
+        )
+        .bind(unix_now())
+        .bind(token_id)
+        .bind(user_id)
+        .execute(db)
+        .await?;
+        Ok(res.rows_affected() > 0)
     }
 }

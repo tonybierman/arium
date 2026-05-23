@@ -17,9 +17,9 @@ use dx_auth::ui::components::input::Input;
 use dx_auth::ui::components::label::Label;
 use dx_auth::ui::components::tabs::{TabContent, TabList, TabTrigger, Tabs};
 use dx_auth::ui::{
-    ForgotPassword, LoginPanel, LoginSubmit, MfaChallenge, MfaSetup, OAuthProvidersProvider,
-    PermissionGate, PermissionsProvider, Policy, RequirePermission, ResetPassword, SubmitKind,
-    VerifyEmail, use_oauth_providers, use_permissions,
+    ApiTokens, ForgotPassword, LoginPanel, LoginSubmit, MfaChallenge, MfaSetup,
+    OAuthProvidersProvider, PermissionGate, PermissionsProvider, Policy, RequirePermission,
+    ResetPassword, SubmitKind, VerifyEmail, use_oauth_providers, use_permissions,
 };
 use dx_auth::{LoginOutcome, UserProfile, friendly_server_error};
 
@@ -177,6 +177,7 @@ fn Home() -> Element {
                             TabList {
                                 TabTrigger { index: 0_usize, value: "account".to_string(), "Account" }
                                 TabTrigger { index: 1_usize, value: "mfa".to_string(),     "Two-factor auth" }
+                                TabTrigger { index: 2_usize, value: "tokens".to_string(),  "API tokens" }
                                 PermissionGate {
                                     policy: admin_policy(),
                                     // The TabTrigger primitive doesn't forward arbitrary
@@ -186,7 +187,7 @@ fn Home() -> Element {
                                     // unmounts before that's visible.
                                     span {
                                         onclick: move |_| { navigator().push(Route::AdminPage); },
-                                        TabTrigger { index: 2_usize, value: "admin".to_string(), "Admin" }
+                                        TabTrigger { index: 3_usize, value: "admin".to_string(), "Admin" }
                                     }
                                 }
                             }
@@ -196,6 +197,9 @@ fn Home() -> Element {
                             }
                             TabContent { index: 1_usize, value: "mfa".to_string(),
                                 MfaSetup {}
+                            }
+                            TabContent { index: 2_usize, value: "tokens".to_string(),
+                                ApiTokens {}
                             }
                         }
                         div { class: "app-actions-buttons",

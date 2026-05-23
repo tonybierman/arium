@@ -10,6 +10,8 @@
 
 use dioxus::prelude::*;
 
+#[cfg(feature = "tokens")]
+use crate::wire::{ApiTokenView, CreateApiTokenResponse};
 use crate::wire::{LoginOutcome, ProviderInfo, UserProfile};
 #[cfg(feature = "mfa")]
 use crate::wire::{MfaSetupView, MfaStatusView};
@@ -626,6 +628,126 @@ pub async fn get_mfa_status() -> Result<MfaStatusView> {
         auth::MfaStatus::Pending => MfaStatusView::Pending,
         auth::MfaStatus::Enabled => MfaStatusView::Enabled,
     })
+}
+
+// ============================================================
+// API tokens (Phase 14)
+// ============================================================
+
+/// Create a new API token for the current user. The cleartext secret is
+/// returned **once** in the response; only its prefix + SHA-256 hash are
+/// persisted, so a lost token can only be replaced (revoke + create), not
+/// recovered. Used by programmatic clients (CLI tools, MCP servers, …)
+/// that bypass the session-cookie path.
+#[cfg(feature = "tokens")]
+#[post("/api/user/tokens/new", auth: auth::Session, db: DbExtension, audit: AuditCtx)]
+pub async fn create_api_token(name: String) -> Result<CreateApiTokenResponse> {
+    let user = auth
+        .current_user
+        .as_ref()
+        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
+    if user.anonymous {
+        return Err(ServerFnError::new("Not signed in.").into());
+    }
+    let user_id = user.id as i64;
+
+    let (token, view) = auth::tokens::create_for_user(&db.0, user_id, &name)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    let details = format!(
+        "{{\"name\":{},\"prefix\":\"{}\"}}",
+        json_string(&view.name),
+        view.prefix
+    );
+    audit
+        .record(
+            &db.0,
+            auth::audit::USER_API_TOKEN_CREATED,
+            Some(user_id),
+            Some(user_id),
+            Some(&details),
+        )
+        .await;
+
+    Ok(CreateApiTokenResponse { token, view })
+}
+
+/// List the current user's active (non-revoked) API tokens, newest first.
+/// The cleartext secret is never returned — only the `prefix` field, which
+/// the UI shows for visual disambiguation.
+#[cfg(feature = "tokens")]
+#[get("/api/user/tokens", auth: auth::Session, db: DbExtension)]
+pub async fn list_api_tokens() -> Result<Vec<ApiTokenView>> {
+    let user = auth
+        .current_user
+        .as_ref()
+        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
+    if user.anonymous {
+        return Err(ServerFnError::new("Not signed in.").into());
+    }
+    auth::tokens::list_for_user(&db.0, user.id as i64)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()).into())
+}
+
+/// Soft-revoke an API token. Errors with `"Token not found."` if the token
+/// doesn't exist, has already been revoked, or belongs to another user
+/// (the three cases are merged to avoid leaking which IDs exist between
+/// users).
+#[cfg(feature = "tokens")]
+#[post("/api/user/tokens/revoke", auth: auth::Session, db: DbExtension, audit: AuditCtx)]
+pub async fn revoke_api_token(token_id: i64) -> Result<()> {
+    let user = auth
+        .current_user
+        .as_ref()
+        .ok_or_else(|| ServerFnError::new("Not signed in."))?;
+    if user.anonymous {
+        return Err(ServerFnError::new("Not signed in.").into());
+    }
+    let user_id = user.id as i64;
+
+    let revoked = auth::tokens::revoke_for_user(&db.0, user_id, token_id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    if !revoked {
+        return Err(ServerFnError::new("Token not found.").into());
+    }
+
+    let details = format!("{{\"token_id\":{token_id}}}");
+    audit
+        .record(
+            &db.0,
+            auth::audit::USER_API_TOKEN_REVOKED,
+            Some(user_id),
+            Some(user_id),
+            Some(&details),
+        )
+        .await;
+    Ok(())
+}
+
+/// Minimal JSON string encoder for audit detail payloads. Escapes only the
+/// characters that MUST be escaped in a JSON string (`"` and `\`); the rest
+/// is passed through unchanged. Names with control characters are rare
+/// enough that a heavier dep isn't worth pulling in.
+#[cfg(feature = "tokens")]
+fn json_string(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len() + 2);
+    out.push('"');
+    for ch in raw.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 // ============================================================

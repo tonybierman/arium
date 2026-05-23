@@ -96,6 +96,8 @@ pub fn migrator() -> sqlx::migrate::Migrator {
 pub use mail::Mailer;
 
 // Wire-types re-exported at the crate root for ergonomics.
+#[cfg(feature = "tokens")]
+pub use wire::{ApiTokenView, CreateApiTokenResponse};
 pub use wire::{LoginOutcome, MfaSetupView, MfaStatusView, ProviderInfo, UserProfile};
 
 /// Extract just the human-readable message from a server-fn error captured

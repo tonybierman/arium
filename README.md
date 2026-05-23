@@ -1,7 +1,10 @@
-# Dioxus Full Stack Authentication
+# Dioxus Full Stack Authentication & Authorization
 
-Reusable authentication library for [Dioxus 0.7](https://dioxuslabs.com)
-fullstack apps. Provides:
+Reusable authentication **and** authorization library for
+[Dioxus 0.7](https://dioxuslabs.com) fullstack apps — sign-in flows,
+session management, MFA, OAuth, and a full RBAC surface (roles,
+permission tokens, route guards, audit log) all in one crate.
+Provides:
 
 - Email + password sign-in / sign-up with Argon2id hashing.
 - "Continue with GitHub" OAuth (env-driven; the button hides itself when

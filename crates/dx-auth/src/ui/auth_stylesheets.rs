@@ -89,6 +89,8 @@ const VERIFY_EMAIL_CSS: Asset =
     asset!("/src/ui/verify_email/style.css", AssetOptions::css_module());
 #[cfg(feature = "mfa")]
 const MFA_CSS: Asset = asset!("/src/ui/mfa/style.css", AssetOptions::css_module());
+#[cfg(feature = "tokens")]
+const TOKENS_CSS: Asset = asset!("/src/ui/tokens/style.css", AssetOptions::css_module());
 
 /// Emits `document::Stylesheet` link tags for every catalog widget and
 /// drop-in auth route the library ships. Rendered by
@@ -125,6 +127,12 @@ pub fn AuthStylesheets() -> Element {
             #[cfg(feature = "mfa")]
             rsx! {
                 document::Stylesheet { href: MFA_CSS }
+            }
+        }
+        {
+            #[cfg(feature = "tokens")]
+            rsx! {
+                document::Stylesheet { href: TOKENS_CSS }
             }
         }
     }

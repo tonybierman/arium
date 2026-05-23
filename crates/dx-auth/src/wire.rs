@@ -73,6 +73,32 @@ pub enum MfaStatusView {
     Enabled,
 }
 
+// ---- API token wire types ----
+
+/// One row in the user's API-token list. The full secret is NEVER returned
+/// after creation — only `prefix` (`"dxsk_abcd"`) so the UI can disambiguate
+/// tokens by sight.
+///
+/// Date fields are pre-formatted on the server (mirrors
+/// [`AuditEventView::occurred_at_iso`]) so the wasm client doesn't need a
+/// date library.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiTokenView {
+    pub id: i64,
+    pub name: String,
+    pub prefix: String,
+    pub created_at_iso: String,
+    pub last_used_at_iso: Option<String>,
+}
+
+/// Response from `create_api_token`. `token` is the cleartext secret —
+/// shown to the user ONCE and never recoverable from the server.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateApiTokenResponse {
+    pub token: String,
+    pub view: ApiTokenView,
+}
+
 // ---- Admin / role wire types ----
 
 /// One row in the admin user-list response. Lightweight enough to render

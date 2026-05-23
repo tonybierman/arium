@@ -12,7 +12,7 @@ repository = "https://github.com/tonybierman/dx-auth"
 path = "src/lib.rs"
 
 [features]
-default = ["server", "ui", "sqlite", "oauth-github", "mfa", "mail", "ratelimit"]
+default = ["server", "ui", "sqlite", "oauth-github", "mfa", "mail", "ratelimit", "tokens"]
 
 # Core server runtime — required for any backend functionality.
 server = [
@@ -52,6 +52,7 @@ oauth-github = ["_oauth-core"]
 mfa = ["dep:totp-rs"]
 mail = ["dep:lettre"]
 ratelimit = ["dep:tower_governor"]
+tokens = ["dep:sha2"]
 
 [dependencies]
 dioxus = { version = "0.7.9", features = ["fullstack", "router"] }
@@ -102,6 +103,7 @@ lettre = { version = "0.11", default-features = false, features = [
 ], optional = true }
 tower_governor = { version = "0.8", default-features = false, features = ["axum"], optional = true }
 totp-rs = { version = "5", features = ["qr", "gen_secret"], optional = true }
+sha2 = { version = "0.10", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", features = ["futures"], default-features = false }
