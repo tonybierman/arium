@@ -147,6 +147,18 @@ fn unix_now_seconds() -> i64 {
         .as_secs() as i64
 }
 
+// Single landing place for the post-credential session-setup contract:
+// flip the session to long-term, then log the user in on the auth layer.
+// Every login path (password signup, password login, MFA verify) goes
+// through here so a future addition (audit-cookie rotation, "first
+// successful login" hook, rate-limit decrement) lands in one file
+// instead of drifting across three.
+#[cfg(feature = "server")]
+fn complete_login(auth: &auth::Session, session: &SessionStore, user_id: i64, remember_me: bool) {
+    session.set_longterm(remember_me);
+    auth.login_user(user_id);
+}
+
 // ============================================================
 // Account state / session
 // ============================================================
@@ -240,8 +252,7 @@ pub async fn register_with_password(email: String, password: String) -> Result<L
                 Some("{\"method\":\"password\",\"auto_verified\":true}"),
             )
             .await;
-        session.set_longterm(false);
-        auth.login_user(user_id);
+        complete_login(&auth, &session, user_id, false);
         return Ok(LoginOutcome::LoggedIn);
     }
 
@@ -314,8 +325,7 @@ pub async fn login_with_password(
                     return Ok(LoginOutcome::MfaRequired);
                 }
             }
-            session.set_longterm(remember_me);
-            auth.login_user(user_id);
+            complete_login(&auth, &session, user_id, remember_me);
             audit
                 .record(
                     &db.0,
@@ -516,8 +526,7 @@ pub async fn verify_login_mfa(code: String) -> Result<LoginOutcome> {
     }
 
     session.remove(MFA_PENDING_KEY);
-    session.set_longterm(remember_me);
-    auth.login_user(user_id);
+    complete_login(&auth, &session, user_id, remember_me);
     audit
         .record(
             &db.0,
