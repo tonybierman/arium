@@ -1,4 +1,4 @@
-# examples/basic
+# examples/dioxus-fullstack-example
 
 End-to-end demo of [`arium-dioxus`](../../). Every auth screen — sign in,
 forgot/reset password, email verification, MFA challenge, MFA setup,
@@ -25,7 +25,7 @@ only owns app-specific pieces:
 ## Run
 
 ```bash
-cd examples/basic
+cd examples/dioxus-fullstack-example
 DX_AUTH_SKIP_EMAIL_VERIFICATION=1 dx serve
 ```
 

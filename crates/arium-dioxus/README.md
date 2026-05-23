@@ -1,7 +1,7 @@
 # Using arium-dioxus
 
 A walkthrough of integrating `arium-dioxus` into a Dioxus 0.7 fullstack app.
-The companion to this document is `examples/basic/` — every pattern here
+The companion to this document is `examples/dioxus-fullstack-example/` — every pattern here
 is exercised there end-to-end.
 
 ## Getting started
@@ -211,7 +211,7 @@ fn Home() -> Element {
 }
 ```
 
-The full version is in `examples/basic/src/main.rs`.
+The full version is in `examples/dioxus-fullstack-example/src/main.rs`.
 
 ## OAuth providers
 
@@ -671,8 +671,8 @@ for any feature where selecting the wrong user matters.
 - `cargo check --workspace` builds the library + example.
 - `cargo check -p arium-dioxus --no-default-features --features server,sqlite`
   builds the minimal library (no MFA, no OAuth, no mail, no rate limit).
-- `cd examples/basic && dx serve` runs the demo.
-- `sqlite3 examples/basic/auth.db '.schema'` inspects the live schema.
+- `cd examples/dioxus-fullstack-example && dx serve` runs the demo.
+- `sqlite3 examples/dioxus-fullstack-example/auth.db '.schema'` inspects the live schema.
 - Migrations are checksummed by sqlx; if you edit a `.sql` file after
   it's been applied, sqlx refuses to start until you wipe the DB or
   add a new migration file with the fix-up.

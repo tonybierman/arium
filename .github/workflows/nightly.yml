@@ -100,21 +100,21 @@ jobs:
   #     - run: cargo install --locked cargo-fuzz
   #     - run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=600
 
-  # ZAP baseline against examples/basic: not enabled yet — needs the
+  # ZAP baseline against examples/dioxus-fullstack-example: not enabled yet — needs the
   # example to boot in CI with a known port + a seeded test user. Wire
-  # that up (a `cargo run -p basic &` step + readiness probe) before
+  # that up (a `cargo run -p dioxus-fullstack-example &` step + readiness probe) before
   # uncommenting.
   #
   # zap:
-  #   name: OWASP ZAP baseline (examples/basic)
+  #   name: OWASP ZAP baseline (examples/dioxus-fullstack-example)
   #   runs-on: ubuntu-latest
   #   continue-on-error: true
   #   steps:
   #     - uses: actions/checkout@v4
   #     - uses: dtolnay/rust-toolchain@stable
-  #     - name: Boot examples/basic
+  #     - name: Boot examples/dioxus-fullstack-example
   #       run: |
-  #         cargo run -p basic &
+  #         cargo run -p dioxus-fullstack-example &
   #         # TODO: replace with a real readiness probe
   #         sleep 30
   #     - uses: zaproxy/action-baseline@v0.12.0

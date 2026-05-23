@@ -26,11 +26,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
-      # Test the library crates — `examples/basic` (fullstack-auth-example)
+      # Test the library crates — `examples/dioxus-fullstack-example` (dioxus-fullstack-example)
       # pulls in the dioxus devtools stack which is slow to build and isn't
       # what we're testing, so it's excluded.
       - name: Test workspace
-        run: cargo test --workspace --exclude fullstack-auth-example
+        run: cargo test --workspace --exclude dioxus-fullstack-example
 
   # Compile-check the realistic feature combos so a future refactor doesn't
   # silently break consumers who turn off `default-features`. Pure
@@ -90,9 +90,9 @@ jobs:
       #      findings in an auth library's request paths — but they're
       #      noisy in test code where unwrap is idiomatic, so we scope
       #      them to the lib target only.
-      - run: cargo clippy --workspace --exclude fullstack-auth-example --all-targets -- -D warnings
+      - run: cargo clippy --workspace --exclude dioxus-fullstack-example --all-targets -- -D warnings
       - run: |
-          cargo clippy --workspace --exclude fullstack-auth-example --lib -- \
+          cargo clippy --workspace --exclude dioxus-fullstack-example --lib -- \
             -D warnings \
             -W clippy::unwrap_used \
             -W clippy::expect_used \

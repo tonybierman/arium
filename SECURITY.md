@@ -29,8 +29,7 @@ The crate is pre-1.0 and ships from `main`. Only the latest commit on
 
 ## Threat model
 
-`arium` is a reusable authentication and authorization library for
-Dioxus fullstack apps. It is intended to defend against:
+`arium` is a reusable authentication and authorization library. It is intended to defend against:
 
 - credential stuffing and brute-force sign-in (per-IP rate limiting),
 - offline password cracking after database exfiltration (Argon2id

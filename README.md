@@ -1,7 +1,6 @@
-# Dioxus Full Stack Authentication & Authorization
+# Arium - For Authentication & Authorization
 
-Reusable authentication **and** authorization library for
-[Dioxus 0.7](https://dioxuslabs.com) fullstack apps — sign-in flows,
+Reusable authentication **and** authorization library — sign-in flows,
 session management, MFA, OAuth, and a full RBAC surface (roles,
 permission tokens, route guards, audit log) all in one crate.
 Provides:
@@ -29,11 +28,6 @@ Provides:
   assignments.
 - Account self-service screens (display name, password change, delete
   account) plus a standalone email-verification screen.
-
-See [USAGE.md](USAGE.md) for getting started, features, environment
-variables, audit log, repo layout, and dev tips.
-
-![LoginPanel screenshot](screenshot.png)
 
 ## License
 
