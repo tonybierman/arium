@@ -102,15 +102,23 @@ jobs:
 
   # RustSec advisory database check against Cargo.lock. New advisories
   # land outside our PRs, so the nightly workflow also runs this.
+  #
+  # We invoke cargo-audit directly rather than using rustsec/audit-check
+  # — that action installs cargo-audit fine but then fails its own
+  # `cargo audit --json --file ./Cargo.lock` step with "entity not
+  # found", which looks like a cwd bug in the action itself.
   audit:
     name: cargo audit (advisory)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2.0.0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          shared-key: tools
+      - run: cargo install --locked cargo-audit
+      - run: cargo audit
 
   # License / source / bans policy enforcement. Configured in deny.toml.
   deny:

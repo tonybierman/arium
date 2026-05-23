@@ -21,16 +21,21 @@ env:
 
 jobs:
   # Re-run the advisory DB against Cargo.lock daily so a freshly-landed
-  # advisory shows up here even when no PR is open.
+  # advisory shows up here even when no PR is open. Direct cargo-audit
+  # invocation — see the note on the matching ci.yml job for why we
+  # don't use rustsec/audit-check.
   audit:
     name: cargo audit
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2.0.0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          shared-key: nightly
+      - run: cargo install --locked cargo-audit
+      - run: cargo audit
 
   # Surface deps that have a newer compatible release.
   outdated:
