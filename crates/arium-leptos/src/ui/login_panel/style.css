@@ -24,7 +24,6 @@
 }
 
 .login-forgot {
-  align-self: flex-start;
   font-size: 0.75rem;
   color: var(--secondary-color-5);
   text-decoration: underline;
@@ -33,6 +32,13 @@
 
 .login-forgot:hover {
   color: var(--secondary-color-3);
+}
+
+.login-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .login-submit {

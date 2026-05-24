@@ -154,28 +154,9 @@ pub fn LoginPanel(
                             value=password
                             on_input=Callback::new(move |v: String| password.set(v))
                         />
-                        <Show when=move || !is_signup() && forgot_href.is_some()>
-                            <a class="login-forgot" href=forgot_href.unwrap_or("#")>
-                                "Forgot?"
-                            </a>
-                        </Show>
                     </div>
 
-                    <Show
-                        when=move || is_signup()
-                        fallback=move || {
-                            view! {
-                                <label class="login-remember">
-                                    <input
-                                        type="checkbox"
-                                        prop:checked=move || remember.get()
-                                        on:change=move |ev| remember.set(event_target_checked(&ev))
-                                    />
-                                    <span>"Remember me on this device"</span>
-                                </label>
-                            }
-                        }
-                    >
+                    <Show when=move || is_signup()>
                         <div class="login-field">
                             <Label html_for="login-password-confirm" class="login-label">
                                 "Confirm password"
@@ -201,6 +182,24 @@ pub fn LoginPanel(
                     <Button variant=ButtonVariant::Primary button_type="submit" class="login-submit">
                         {move || if is_signup() { signup_submit_label } else { submit_label }}
                     </Button>
+
+                    <Show when=move || !is_signup()>
+                        <div class="login-options">
+                            <label class="login-remember">
+                                <input
+                                    type="checkbox"
+                                    prop:checked=move || remember.get()
+                                    on:change=move |ev| remember.set(event_target_checked(&ev))
+                                />
+                                <span>"Remember me on this device"</span>
+                            </label>
+                            <Show when=move || forgot_href.is_some()>
+                                <a class="login-forgot" href=forgot_href.unwrap_or("#")>
+                                    "Forgot?"
+                                </a>
+                            </Show>
+                        </div>
+                    </Show>
 
                     <div class="login-toggle">
                         <span>

@@ -195,15 +195,6 @@ pub fn LoginPanel(
                             value: "{password}",
                             oninput: move |evt: FormEvent| password.set(evt.value()),
                         }
-                        if !is_signup {
-                            if let Some(href) = forgot_href {
-                                a {
-                                    class: Styles::login_forgot,
-                                    href: "{href}",
-                                    "Forgot?"
-                                }
-                            }
-                        }
                     }
 
                     if is_signup {
@@ -223,17 +214,6 @@ pub fn LoginPanel(
                                 oninput: move |evt: FormEvent| password_confirm.set(evt.value()),
                             }
                         }
-                    } else {
-                        label { class: Styles::login_remember,
-                            input {
-                                r#type: "checkbox",
-                                checked: remember(),
-                                oninput: move |evt: FormEvent| {
-                                    remember.set(evt.value() == "true" || evt.value() == "on");
-                                },
-                            }
-                            span { "Remember me on this device" }
-                        }
                     }
 
                     if let Some(msg) = displayed_error {
@@ -249,6 +229,28 @@ pub fn LoginPanel(
                         r#type: "submit",
                         class: Styles::login_submit,
                         "{effective_submit_label}"
+                    }
+
+                    if !is_signup {
+                        div { class: Styles::login_options,
+                            label { class: Styles::login_remember,
+                                input {
+                                    r#type: "checkbox",
+                                    checked: remember(),
+                                    oninput: move |evt: FormEvent| {
+                                        remember.set(evt.value() == "true" || evt.value() == "on");
+                                    },
+                                }
+                                span { "Remember me on this device" }
+                            }
+                            if let Some(href) = forgot_href {
+                                a {
+                                    class: Styles::login_forgot,
+                                    href: "{href}",
+                                    "Forgot?"
+                                }
+                            }
+                        }
                     }
 
                     div { class: Styles::login_toggle,
