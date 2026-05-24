@@ -34,32 +34,70 @@ jobs:
 
   # Compile-check the realistic feature combos so a future refactor doesn't
   # silently break consumers who turn off `default-features`. Pure
-  # `cargo check`, no test execution — fast.
+  # `cargo check`, no test execution — fast. Covers both UI adapters: the
+  # Dioxus adapter gates its server side on `server`, the Leptos adapter on
+  # `ssr`, so the combos mirror each other under each crate's feature name.
   feature-matrix:
-    name: check ${{ matrix.features }}
+    name: check ${{ matrix.package }} ${{ matrix.features }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        features:
-          - "server,sqlite"
-          - "server,sqlite,oauth-github"
-          - "server,sqlite,mfa,mail,ratelimit"
-          - "server,sqlite,tokens"
-          - "server,sqlite,ui,oauth-github,mfa,mail,ratelimit,tokens"
-          - "server,postgres,oauth-github,mfa,mail,ratelimit,tokens"
+        include:
+          # arium-dioxus (server side gated on `server`)
+          - { package: arium-dioxus, features: "server,sqlite" }
+          - { package: arium-dioxus, features: "server,sqlite,oauth-github" }
+          - { package: arium-dioxus, features: "server,sqlite,mfa,mail,ratelimit" }
+          - { package: arium-dioxus, features: "server,sqlite,tokens" }
+          - { package: arium-dioxus, features: "server,sqlite,ui,oauth-github,mfa,mail,ratelimit,tokens" }
+          - { package: arium-dioxus, features: "server,postgres,oauth-github,mfa,mail,ratelimit,tokens" }
+          # arium-leptos (server side gated on `ssr`)
+          - { package: arium-leptos, features: "ssr,sqlite" }
+          - { package: arium-leptos, features: "ssr,sqlite,oauth-github" }
+          - { package: arium-leptos, features: "ssr,sqlite,mfa,mail,ratelimit" }
+          - { package: arium-leptos, features: "ssr,sqlite,tokens" }
+          - { package: arium-leptos, features: "ssr,sqlite,ui,oauth-github,mfa,mail,ratelimit,tokens" }
+          - { package: arium-leptos, features: "ssr,postgres,oauth-github,mfa,mail,ratelimit,tokens" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: features-${{ matrix.features }}
+          shared-key: features-${{ matrix.package }}-${{ matrix.features }}
       - name: Check
         run: |
           cargo check \
-            --package arium-dioxus \
+            --package ${{ matrix.package }} \
             --no-default-features \
             --features "${{ matrix.features }}"
+
+  # Client/wasm builds for both UI adapters. The test / feature-matrix jobs
+  # only exercise the native (server) side; this compiles the browser side on
+  # the wasm32 target — the Dioxus client build (no `server`) and the Leptos
+  # `hydrate` build — so a change can't silently break hydration consumers.
+  wasm:
+    name: check wasm client builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
+      - name: arium-leptos (hydrate)
+        run: |
+          cargo check --package arium-leptos \
+            --target wasm32-unknown-unknown \
+            --no-default-features \
+            --features hydrate,ui,sqlite,oauth-github,mfa,mail,ratelimit,tokens
+      - name: arium-dioxus (client)
+        run: |
+          cargo check --package arium-dioxus \
+            --target wasm32-unknown-unknown \
+            --no-default-features \
+            --features ui,sqlite,oauth-github,mfa,mail,ratelimit,tokens
 
   fmt:
     name: cargo fmt
