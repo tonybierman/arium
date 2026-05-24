@@ -17,7 +17,7 @@ fresh).
   it, verification/reset emails are written to `./emails/*.eml`.
 - Set `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET` to enable the GitHub
   button; set `SMTP_HOST` (+ creds) for real email. See
-  [USAGE.md](../../USAGE.md#environment-variables) for the full list.
+  [CONFIG_DIOXUS.md](../../CONFIG_DIOXUS.md#environment-variables) for the full list.
 
 Needs the [Dioxus CLI](https://dioxuslabs.com/learn/0.7/getting_started/)
 (`dx`).
