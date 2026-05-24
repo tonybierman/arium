@@ -1,9 +1,9 @@
 # Dependabot keeps the routine, compatible churn batched into a few reviewable
 # PRs a week. CI (test + feature-matrix + wasm + clippy + audit + deny) is the
-# gate on each one. Note: Cargo.lock is gitignored here, so Dependabot operates
-# on the version *requirements* in the Cargo.toml manifests — it bumps a `^x.y`
-# range when the range no longer admits the latest release. It does NOT manage
-# git dependencies (dioxus-primitives), which we pin by `rev` and bump by hand.
+# gate on each one. Cargo.lock is committed, so Dependabot updates the locked
+# versions (and widens a `^x.y` requirement only when the range can't admit the
+# new release). It does NOT manage git dependencies (dioxus-primitives), which
+# we pin by `rev` and bump by hand.
 version: 2
 updates:
   - package-ecosystem: cargo
