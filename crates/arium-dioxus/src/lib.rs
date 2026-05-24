@@ -1,7 +1,7 @@
 //! Dioxus 0.7 adapter for the [`arium`](https://github.com/tonybierman/arium) auth engine.
 //!
 //! This crate exposes arium's authentication as Dioxus fullstack server
-//! functions ([`server`]) plus ready-made UI components ([`ui`]). The
+//! functions (`server`) plus ready-made UI components (`ui`). The
 //! framework-agnostic engine lives in the `arium` crate; this adapter wires it
 //! to Dioxus and, under the `server` feature, re-exports the engine's
 //! server-side API (`AuthConfig`, `install`, `migrator`, `Mailer`, the OAuth

@@ -2,7 +2,7 @@
 //!
 //! `arium` owns the auth domain — password hashing, sessions, OAuth, MFA/TOTP,
 //! email verification + password reset, RBAC, API tokens, and an audit log —
-//! plus the [`install`] helper that bolts the whole thing onto an
+//! plus the `install` helper that bolts the whole thing onto an
 //! `axum::Router`. It has no UI-framework dependency; framework adapters such
 //! as `arium-dioxus` wrap these primitives in their own server fns + UI.
 //!

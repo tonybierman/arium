@@ -182,6 +182,29 @@ jobs:
       - uses: actions/checkout@v4
       - uses: bnjbvr/cargo-machete@main
 
+  # README drift guard. Each library crate's README is generated from its
+  # `//!` doc comment by cargo-rdme; this fails if a doc-comment change wasn't
+  # regenerated (`cargo rdme` in the crate, or `cargo rdme -w <crate>` from root).
+  # arium-dioxus is held from publishing (git dep on dioxus-primitives) but is
+  # checked here too so its README stays in sync and stays release-ready.
+  readme:
+    name: cargo rdme
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: tools
+      - run: cargo install --locked cargo-rdme
+      - name: Check READMEs are in sync with doc comments
+        run: |
+          for crate in arium arium-dioxus arium-leptos arium-wire; do
+            echo "::group::cargo rdme --check -w $crate"
+            cargo rdme --check -w "$crate"
+            echo "::endgroup::"
+          done
+
   # Secret scan on the full repo. Gating: a hit here means a credential
   # is about to land in git history — that's worth blocking the merge.
   #

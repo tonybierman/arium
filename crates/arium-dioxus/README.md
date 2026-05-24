@@ -1,4 +1,33 @@
-# Using arium-dioxus
+[![Crates.io](https://img.shields.io/crates/v/arium-dioxus.svg)](https://crates.io/crates/arium-dioxus)
+[![Docs.rs](https://docs.rs/arium-dioxus/badge.svg)](https://docs.rs/arium-dioxus)
+[![CI](https://github.com/tonybierman/arium/actions/workflows/ci.yml/badge.svg)](https://github.com/tonybierman/arium/actions)
+[![License](https://img.shields.io/crates/l/arium-dioxus.svg)](#license)
+
+# arium-dioxus
+
+<!-- The section below is generated from src/lib.rs by cargo-rdme. Edit the `//!` doc comment, then run `cargo rdme`. -->
+<!-- cargo-rdme start -->
+
+Dioxus 0.7 adapter for the [`arium`](https://github.com/tonybierman/arium) auth engine.
+
+This crate exposes arium's authentication as Dioxus fullstack server
+functions (`server`) plus ready-made UI components (`ui`). The
+framework-agnostic engine lives in the `arium` crate; this adapter wires it
+to Dioxus and, under the `server` feature, re-exports the engine's
+server-side API (`AuthConfig`, `install`, `migrator`, `Mailer`, the OAuth
+registry, the request extractors) so a fullstack app can reach everything
+through this one crate.
+
+```rust
+use arium_dioxus::{
+    AuthConfig, Mailer, install, migrator,
+    oauth::{github::GithubProvider, OAuthRegistry},
+    server::*,
+    ui::LoginPanel,
+};
+```
+
+<!-- cargo-rdme end -->
 
 A walkthrough of integrating `arium-dioxus` into a Dioxus 0.7 fullstack app.
 The companion to this document is `examples/dioxus-fullstack-example/` — every pattern here
@@ -676,3 +705,12 @@ for any feature where selecting the wrong user matters.
 - Migrations are checksummed by sqlx; if you edit a `.sql` file after
   it's been applied, sqlx refuses to start until you wipe the DB or
   add a new migration file with the fix-up.
+
+## License
+
+Licensed under either of:
+
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
+
+at your option.

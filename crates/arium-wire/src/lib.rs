@@ -1,5 +1,28 @@
 //! Types that cross the client/server boundary. Kept feature-flag-free so
 //! they compile on both targets without bringing in any server-only deps.
+//!
+//! Most apps don't depend on this crate directly — they get these types
+//! transitively through `arium`, `arium-leptos`, or `arium-dioxus`, which
+//! re-export them (e.g. `arium_leptos::wire`). Depend on it directly only when
+//! sharing the types with a separate client crate.
+//!
+//! ```rust
+//! use arium_wire::{LoginOutcome, UserProfile};
+//!
+//! let profile = UserProfile {
+//!     is_authenticated: true,
+//!     username: "ada".to_string(),
+//!     ..Default::default()
+//! };
+//! println!("Signed in as {}", profile.display());
+//!
+//! let next = match LoginOutcome::MfaRequired {
+//!     LoginOutcome::LoggedIn => "dashboard",
+//!     LoginOutcome::EmailUnverified => "verify email",
+//!     LoginOutcome::MfaRequired => "enter a TOTP code",
+//! };
+//! assert_eq!(next, "enter a TOTP code");
+//! ```
 
 use serde::{Deserialize, Serialize};
 

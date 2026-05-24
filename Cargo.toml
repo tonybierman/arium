@@ -1,3 +1,21 @@
 [workspace]
 members = ["crates/arium-wire", "crates/arium", "crates/arium-dioxus", "crates/arium-leptos", "examples/dioxus-fullstack-example", "examples/leptos-fullstack-example"]
 resolver = "3"
+
+# Shared package metadata. Published crates inherit these via
+# `<field>.workspace = true`. Lockstep: bump `version` once and every crate that
+# inherits it moves together.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["Tony Bierman <tonybierman@gmail.com>"]
+repository = "https://github.com/tonybierman/arium"
+homepage = "https://github.com/tonybierman/arium"
+
+# Intra-workspace deps carry BOTH a version (so crates.io resolves them) and a
+# path (so local builds use the working tree). Members reference these via
+# `{ workspace = true }`.
+[workspace.dependencies]
+arium-wire = { version = "0.1.0", path = "crates/arium-wire" }
+arium = { version = "0.1.0", path = "crates/arium", default-features = false }

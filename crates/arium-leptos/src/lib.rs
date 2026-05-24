@@ -1,7 +1,7 @@
 //! Leptos 0.8 adapter for the [`arium`](https://github.com/tonybierman/arium) auth engine.
 //!
 //! This crate exposes arium's authentication as Leptos fullstack server
-//! functions ([`server`]) plus ready-made UI components ([`ui`]). The
+//! functions (`server`) plus ready-made UI components (`ui`). The
 //! framework-agnostic engine lives in the `arium` crate; this adapter wires it
 //! to Leptos and, under the `ssr` feature, re-exports the engine's server-side
 //! API (`AuthConfig`, `install`, `migrator`, `Mailer`, the OAuth registry, the
@@ -11,6 +11,19 @@
 //! Unlike the Dioxus adapter, the server/client split is driven by the `ssr` /
 //! `hydrate` cargo features (`#[cfg(feature = "ssr")]`), not by
 //! `cfg(target_arch = "wasm32")` — Leptos compiles the crate once per side.
+//!
+//! ```rust,ignore
+//! // Server (`ssr` feature): layer the engine onto your Leptos axum router.
+//! use arium_leptos::{AuthConfig, Mailer, install, migrator};
+//!
+//! migrator().run(&pool).await?;
+//! let cfg = AuthConfig::builder(pool.clone(), Mailer::from_env()?).build()?;
+//! let app = install(app, cfg).await?; // sessions, OAuth routes, audit, rate limiting
+//!
+//! // Client + server: wrap the router and drop in components.
+//! use arium_leptos::ui::{LoginPanel, OAuthProvidersProvider, PermissionsProvider};
+//! // <PermissionsProvider><OAuthProvidersProvider> <Router/> … <LoginPanel/> … </…></…>
+//! ```
 
 #![allow(clippy::needless_doctest_main)]
 

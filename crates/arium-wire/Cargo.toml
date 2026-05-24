@@ -1,12 +1,13 @@
 [package]
 name = "arium-wire"
-version = "0.1.0"
-edition = "2024"
-publish = false
+version.workspace = true
+edition.workspace = true
 description = "Framework-agnostic wire types shared across arium auth crates."
-license = "MIT OR Apache-2.0"
-authors = ["Tony Bierman <tonybierman@gmail.com>"]
-repository = "https://github.com/tonybierman/arium"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
 
 [lib]
 path = "src/lib.rs"

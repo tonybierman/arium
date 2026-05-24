@@ -1,12 +1,13 @@
 [package]
 name = "arium"
-version = "0.1.0"
-edition = "2024"
-publish = false
+version.workspace = true
+edition.workspace = true
 description = "Framework-agnostic authentication engine (passwords, sessions, OAuth, MFA, RBAC, API tokens, audit) for axum + sqlx apps."
-license = "MIT OR Apache-2.0"
-authors = ["Tony Bierman <tonybierman@gmail.com>"]
-repository = "https://github.com/tonybierman/arium"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
 
 [lib]
 path = "src/lib.rs"
@@ -35,7 +36,7 @@ ratelimit = ["dep:tower_governor"]
 tokens = ["dep:sha2"]
 
 [dependencies]
-arium-wire = { path = "../arium-wire" }
+arium-wire = { workspace = true }
 serde = { version = "1.0.225", features = ["derive"] }
 anyhow = "1.0.98"
 
