@@ -6,6 +6,8 @@ edition.workspace = true
 # (it's currently a git dep). Everything else is release-ready.
 publish = false
 description = "Dioxus 0.7 adapter for the arium auth engine: server fns + UI components."
+keywords = ["dioxus", "authentication", "oauth", "fullstack", "axum"]
+categories = ["authentication", "web-programming", "gui"]
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
