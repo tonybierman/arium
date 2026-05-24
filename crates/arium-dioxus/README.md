@@ -36,7 +36,7 @@ use arium_dioxus::{
 arium-dioxus = "0.1"
 ```
 
-Like any Dioxus fullstack app, the crate is compiled for two targets: the wasm client and the native server. The capability flags (`ui`, `oauth-github`, `mfa`, `mail`, `ratelimit`, `tokens`) must be present on **both** builds so the dioxus macro sees the gated server-fn declarations; the server-only crates they pull in are already target-gated to non-wasm. The backend (`sqlite` / `postgres`) is server-only — keep it gated behind your own `server` feature, not in the default feature list. See [`examples/dioxus-fullstack-example`](https://github.com/tonybierman/arium/tree/main/examples/dioxus-fullstack-example) for a complete `Cargo.toml` and an end-to-end app. Full API reference on [docs.rs](https://docs.rs/arium-dioxus).
+Like any Dioxus fullstack app, the crate is compiled for two targets: the wasm client and the native server. The capability flags (`ui`, `oauth-github`, `oauth-oidc`, `oauth-google`, `oauth-microsoft`, `mfa`, `mail`, `ratelimit`, `tokens`) must be present on **both** builds so the dioxus macro sees the gated server-fn declarations; the server-only crates they pull in are already target-gated to non-wasm. The backend (`sqlite` / `postgres`) is server-only — keep it gated behind your own `server` feature, not in the default feature list. See [`examples/dioxus-fullstack-example`](https://github.com/tonybierman/arium/tree/main/examples/dioxus-fullstack-example) for a complete `Cargo.toml` and an end-to-end app. Full API reference on [docs.rs](https://docs.rs/arium-dioxus).
 
 ## License
 

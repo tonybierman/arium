@@ -1,6 +1,7 @@
 //! Framework-agnostic authentication engine for axum + sqlx fullstack apps.
 //!
-//! `arium` owns the auth domain — password hashing, sessions, OAuth, MFA/TOTP,
+//! `arium` owns the auth domain — password hashing, sessions, OAuth and
+//! OpenID Connect (GitHub, Google, Microsoft, or any OIDC issuer), MFA/TOTP,
 //! email verification + password reset, RBAC, API tokens, and an audit log —
 //! plus the `install` helper that bolts the whole thing onto an
 //! `axum::Router`. It has no UI-framework dependency; framework adapters such
@@ -31,6 +32,11 @@
 //! // `router` is any `axum::Router` (e.g. your framework's server router).
 //! let router = install(router, cfg).await?;
 //! ```
+//!
+//! `oauth-github` is on by default. The opt-in `oauth-oidc`, `oauth-google`,
+//! and `oauth-microsoft` features add a generic OpenID Connect provider plus
+//! Google/Microsoft presets — each `from_env()`-constructed and registered the
+//! same way as `GithubProvider` above.
 
 #![allow(clippy::needless_doctest_main)]
 

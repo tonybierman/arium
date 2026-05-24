@@ -44,7 +44,7 @@ use arium_leptos::ui::{LoginPanel, OAuthProvidersProvider, PermissionsProvider};
 arium-leptos = "0.1"
 ```
 
-Like any Leptos fullstack app, the crate is compiled twice: `ssr` for the server binary, `hydrate` for the wasm client. The capability flags (`oauth-github`, `mfa`, `mail`, `ratelimit`, `tokens`) and the backend (`sqlite` / `postgres`) must be present on **both** builds; they only pull in engine code on the `ssr` build. See [`examples/leptos-fullstack-example`](https://github.com/tonybierman/arium/tree/main/examples/leptos-fullstack-example) for a complete `Cargo.toml` and an end-to-end app. Full API reference on [docs.rs](https://docs.rs/arium-leptos).
+Like any Leptos fullstack app, the crate is compiled twice: `ssr` for the server binary, `hydrate` for the wasm client. The capability flags (`oauth-github`, `oauth-oidc`, `oauth-google`, `oauth-microsoft`, `mfa`, `mail`, `ratelimit`, `tokens`) and the backend (`sqlite` / `postgres`) must be present on **both** builds; they only pull in engine code on the `ssr` build. See [`examples/leptos-fullstack-example`](https://github.com/tonybierman/arium/tree/main/examples/leptos-fullstack-example) for a complete `Cargo.toml` and an end-to-end app. Full API reference on [docs.rs](https://docs.rs/arium-leptos).
 
 ## License
 

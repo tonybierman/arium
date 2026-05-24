@@ -10,7 +10,8 @@
 
 Framework-agnostic authentication engine for axum + sqlx fullstack apps.
 
-`arium` owns the auth domain — password hashing, sessions, OAuth, MFA/TOTP,
+`arium` owns the auth domain — password hashing, sessions, OAuth and
+OpenID Connect (GitHub, Google, Microsoft, or any OIDC issuer), MFA/TOTP,
 email verification + password reset, RBAC, API tokens, and an audit log —
 plus the `install` helper that bolts the whole thing onto an
 `axum::Router`. It has no UI-framework dependency; framework adapters such
@@ -42,6 +43,11 @@ let cfg = AuthConfig::builder(pool.clone(), Mailer::from_env()?)
 let router = install(router, cfg).await?;
 ```
 
+`oauth-github` is on by default. The opt-in `oauth-oidc`, `oauth-google`,
+and `oauth-microsoft` features add a generic OpenID Connect provider plus
+Google/Microsoft presets — each `from_env()`-constructed and registered the
+same way as `GithubProvider` above.
+
 <!-- cargo-rdme end -->
 
 ## Installation
@@ -63,6 +69,9 @@ arium = { version = "0.1", default-features = false, features = ["postgres", "oa
 | `sqlite`       | yes     | SQLite backend (pick exactly one backend)      |
 | `postgres`     | no      | PostgreSQL backend (pick exactly one backend)  |
 | `oauth-github` | yes     | GitHub OAuth provider + routes                 |
+| `oauth-oidc`   | no      | Generic OpenID Connect provider (any issuer)   |
+| `oauth-google` | no      | Google OIDC preset (implies `oauth-oidc`)      |
+| `oauth-microsoft` | no   | Microsoft OIDC preset (implies `oauth-oidc`)   |
 | `mfa`          | yes     | TOTP MFA setup and challenge                   |
 | `mail`         | yes     | Email verification & password reset (`Mailer`) |
 | `ratelimit`    | yes     | Per-IP rate limiting on auth routes            |
