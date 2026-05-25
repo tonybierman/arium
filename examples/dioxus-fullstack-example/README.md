@@ -55,3 +55,26 @@ in `./data/` (host-owned, gitignored) — `rm -rf data` to start fresh.
   [CONFIG_DIOXUS.md](../../CONFIG_DIOXUS.md#environment-variables).
 - After a code change, re-bundle and rebuild:
   `dx bundle --release --platform web --package dioxus-fullstack-example && docker compose up -d --build`.
+
+## Run against Postgres
+
+The backend (SQLite vs Postgres) is a **compile-time** choice — arium selects it
+via a cargo feature, so you bundle with `--features postgres` and run a second
+compose file that adds a `db` service. SQLite stays the default; this is purely
+opt-in.
+
+```bash
+cd examples/dioxus-fullstack-example
+dx bundle --release --platform web --package dioxus-fullstack-example \
+    --no-default-features --features web,server,postgres
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --build
+```
+
+`docker-compose.postgres.yml` layers on top of the base file: it adds a
+`postgres:16-alpine` service (data in the `pgdata` named volume) and repoints
+the app's `DATABASE_URL` at it, with `depends_on: condition: service_healthy`
+so the first migration doesn't race the database. Override the DB credentials
+with `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` in `.env` (defaults:
+`arium`/`arium`). The same arium migrations run, just against the Postgres
+dialect. Tear down with `docker compose -f docker-compose.yml -f docker-compose.postgres.yml down -v`
+(`-v` also drops the `pgdata` volume).

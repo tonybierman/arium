@@ -28,10 +28,11 @@ arium-dioxus = { path = "../../crates/arium-dioxus", default-features = false, f
 # Server-side deps the example still touches directly (sqlx for the pool +
 # migrations, axum_session_auth for the Auth/Rights check in get_permissions).
 axum = { version = "0.8.4", default-features = false, optional = true, features = ["macros"] }
+# The sqlx driver (`sqlite`/`postgres`) is added by the matching backend feature
+# below, not pinned here — it must track arium's compile-time backend choice.
 sqlx = { version = "0.8.6", features = [
     "macros",
     "migrate",
-    "sqlite",
     "_unstable-all-types",
     "tls-native-tls",
     "runtime-tokio",
@@ -43,16 +44,21 @@ axum_session_auth = { version = "0.16.0", optional = true }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "837c9d4c1c9f99b19de7a3f087d8af1b0538dcae", version = "0.0.1", default-features = false }
 
 [features]
-default = ["web", "server"]
+default = ["web", "server", "sqlite"]
 server = [
     "dioxus/server",
     "dep:axum",
     "dep:sqlx",
     "dep:axum_session_auth",
     "arium-dioxus/server",
-    "arium-dioxus/sqlite",
 ]
 web = ["dioxus/web", "dep:dioxus-web"]
+
+# Backend selection — enable exactly one, matching arium's compile-time choice
+# (`arium` has a `compile_error!` if both are on). `default` ships `sqlite`; for
+# Postgres, build with `--no-default-features --features web,server,postgres`.
+sqlite = ["arium-dioxus/sqlite", "sqlx/sqlite"]
+postgres = ["arium-dioxus/postgres", "sqlx/postgres"]
 
 # Optional: Google sign-in via the OIDC engine. Off by default (keeps the
 # openidconnect crate out of the default build). Enable with

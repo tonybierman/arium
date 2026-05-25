@@ -1,0 +1,44 @@
+# Postgres overlay for the Dioxus example. The backend is a COMPILE-TIME choice
+# (arium picks sqlite vs postgres via a cargo feature), so bundle with the
+# postgres feature BEFORE bringing the stack up — the base image just runs
+# whatever bundle is in `target/`:
+#
+#   dx bundle --release --platform web --package dioxus-fullstack-example \
+#       --no-default-features --features web,server,postgres
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --build
+#
+# This file layers on top of docker-compose.yml: it adds a `db` Postgres
+# service and repoints the app's DATABASE_URL at it (overriding the base
+# file's sqlite path). The base bind-mount (./data) still holds the .eml
+# mailer output; Postgres data lives in the `pgdata` named volume.
+services:
+  app:
+    environment:
+      # Overrides the sqlite DATABASE_URL from the base compose file. `db` is
+      # the service name below, resolvable on the default compose network.
+      DATABASE_URL: postgres://${POSTGRES_USER:-arium}:${POSTGRES_PASSWORD:-arium}@db:5432/${POSTGRES_DB:-arium}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    container_name: dioxus-fullstack-example-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-arium}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arium}
+      POSTGRES_DB: ${POSTGRES_DB:-arium}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `app` waits on this (depends_on: service_healthy) so the first
+      # migrator().run() doesn't race the database coming up.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arium} -d ${POSTGRES_DB:-arium}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata:

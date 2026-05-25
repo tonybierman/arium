@@ -25,10 +25,11 @@ anyhow = "1"
 # Server-only deps (the axum host, runtime, db pool, Leptos axum integration).
 axum = { version = "0.8.4", optional = true }
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net"], optional = true }
+# The sqlx driver (`sqlite`/`postgres`) is added by the matching backend feature
+# below, not pinned here — it must track arium's compile-time backend choice.
 sqlx = { version = "0.8.6", default-features = false, features = [
     "macros",
     "migrate",
-    "sqlite",
     "_unstable-all-types",
     "tls-native-tls",
     "runtime-tokio",
@@ -40,7 +41,7 @@ wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 
 [features]
-default = ["ssr"]
+default = ["ssr", "sqlite"]
 ssr = [
     "dep:axum",
     "dep:tokio",
@@ -50,8 +51,14 @@ ssr = [
     "leptos_meta/ssr",
     "leptos_router/ssr",
     "arium-leptos/ssr",
-    "arium-leptos/sqlite",
 ]
+
+# Backend selection — enable exactly one, matching arium's compile-time choice
+# (`arium` has a `compile_error!` if both are on). `default` ships `sqlite`; for
+# Postgres, build with `cargo leptos build --release --bin-features ssr,postgres`.
+sqlite = ["arium-leptos/sqlite", "sqlx/sqlite"]
+postgres = ["arium-leptos/postgres", "sqlx/postgres"]
+
 hydrate = [
     "leptos/hydrate",
     "arium-leptos/hydrate",
@@ -70,7 +77,9 @@ site-root = "target/site"
 site-pkg-dir = "pkg"
 site-addr = "127.0.0.1:3000"
 reload-port = 3001
-bin-features = ["ssr"]
+# Includes the default `sqlite` backend; the Postgres build overrides this with
+# `cargo leptos build --bin-features ssr,postgres`.
+bin-features = ["ssr", "sqlite"]
 bin-default-features = false
 lib-features = ["hydrate"]
 lib-default-features = false

@@ -13,25 +13,50 @@ async fn main() -> anyhow::Result<()> {
     };
     use leptos_fullstack_example::app::App;
     use leptos_fullstack_example::shell;
-    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-    use std::str::FromStr;
 
-    // DB location: `DATABASE_URL` when set (e.g. the Docker image passes
-    // `sqlite:///app/data/auth-leptos.db?mode=rwc`), otherwise a dev default
-    // under the workspace `target/` dir (gitignored), not the example's cwd.
-    let connect_opts = match std::env::var("DATABASE_URL") {
-        Ok(url) if !url.trim().is_empty() => SqliteConnectOptions::from_str(&url)?,
-        _ => SqliteConnectOptions::new()
-            .filename(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../target/auth-leptos.db"
-            ))
-            .create_if_missing(true),
+    // Backend is chosen at compile time (the `sqlite` / `postgres` cargo
+    // features, which also flip arium's backend). Each branch builds the
+    // matching sqlx pool; everything below this point is backend-agnostic.
+    #[cfg(feature = "sqlite")]
+    let pool = {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        use std::str::FromStr;
+
+        // DB location: `DATABASE_URL` when set (e.g. the Docker image passes
+        // `sqlite:///app/data/auth-leptos.db?mode=rwc`), otherwise a dev default
+        // under the workspace `target/` dir (gitignored), not the example's cwd.
+        let connect_opts = match std::env::var("DATABASE_URL") {
+            Ok(url) if !url.trim().is_empty() => SqliteConnectOptions::from_str(&url)?,
+            _ => SqliteConnectOptions::new()
+                .filename(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../target/auth-leptos.db"
+                ))
+                .create_if_missing(true),
+        };
+        SqlitePoolOptions::new()
+            .max_connections(20)
+            .connect_with(connect_opts)
+            .await?
     };
-    let pool = SqlitePoolOptions::new()
-        .max_connections(20)
-        .connect_with(connect_opts)
-        .await?;
+    #[cfg(feature = "postgres")]
+    let pool = {
+        use sqlx::postgres::PgPoolOptions;
+
+        // Postgres has no sensible file default, so `DATABASE_URL` is required
+        // (the compose overlay sets it to the `db` service). The server creates
+        // the schema via the migrator below.
+        let url = std::env::var("DATABASE_URL").map_err(|_| {
+            anyhow::anyhow!(
+                "DATABASE_URL must be set for the postgres backend, e.g. \
+                 postgres://user:pass@host:5432/dbname"
+            )
+        })?;
+        PgPoolOptions::new()
+            .max_connections(20)
+            .connect(&url)
+            .await?
+    };
     arium_leptos::migrator().run(&pool).await?;
 
     let mailer = arium_leptos::Mailer::from_env()?;

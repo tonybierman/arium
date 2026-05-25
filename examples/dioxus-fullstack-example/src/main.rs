@@ -48,25 +48,50 @@ fn main() {
 
     #[cfg(feature = "server")]
     dioxus::serve(|| async {
-        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-        use std::str::FromStr;
+        // Backend is chosen at compile time (the `sqlite` / `postgres` cargo
+        // features, which also flip arium's backend). Each branch builds the
+        // matching sqlx pool; everything below this point is backend-agnostic.
+        #[cfg(feature = "sqlite")]
+        let pool = {
+            use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+            use std::str::FromStr;
 
-        // DB location: `DATABASE_URL` when set (e.g. the Docker image passes
-        // `sqlite:///app/data/auth.db?mode=rwc`), otherwise a dev default under
-        // the workspace `target/` dir (already gitignored), keeping it out of
-        // the example's cwd. CARGO_MANIFEST_DIR is resolved at compile time;
-        // `../../target` is the workspace target relative to this crate at
-        // `examples/dioxus-fullstack-example`.
-        let connect_opts = match std::env::var("DATABASE_URL") {
-            Ok(url) if !url.trim().is_empty() => SqliteConnectOptions::from_str(&url)?,
-            _ => SqliteConnectOptions::new()
-                .filename(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/auth.db"))
-                .create_if_missing(true),
+            // DB location: `DATABASE_URL` when set (e.g. the Docker image passes
+            // `sqlite:///app/data/auth.db?mode=rwc`), otherwise a dev default
+            // under the workspace `target/` dir (already gitignored), keeping it
+            // out of the example's cwd. CARGO_MANIFEST_DIR is resolved at
+            // compile time; `../../target` is the workspace target relative to
+            // this crate at `examples/dioxus-fullstack-example`.
+            let connect_opts = match std::env::var("DATABASE_URL") {
+                Ok(url) if !url.trim().is_empty() => SqliteConnectOptions::from_str(&url)?,
+                _ => SqliteConnectOptions::new()
+                    .filename(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/auth.db"))
+                    .create_if_missing(true),
+            };
+            SqlitePoolOptions::new()
+                .max_connections(20)
+                .connect_with(connect_opts)
+                .await?
         };
-        let pool = SqlitePoolOptions::new()
-            .max_connections(20)
-            .connect_with(connect_opts)
-            .await?;
+        #[cfg(feature = "postgres")]
+        let pool = {
+            use sqlx::postgres::PgPoolOptions;
+
+            // Postgres has no sensible file default, so `DATABASE_URL` is
+            // required (the compose overlay sets it to the `db` service). The
+            // server creates the schema via the migrator below.
+            let url = std::env::var("DATABASE_URL").map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "DATABASE_URL must be set for the postgres backend, e.g. \
+                     postgres://user:pass@host:5432/dbname",
+                )
+            })?;
+            PgPoolOptions::new()
+                .max_connections(20)
+                .connect(&url)
+                .await?
+        };
         // arium owns the schema for `users`, `oauth_accounts`, `roles`,
         // `audit_events`, `api_keys`, ... — they're embedded in the arium
         // crate. App-specific migrations (none yet) would run after this.
@@ -399,7 +424,7 @@ pub async fn get_permissions() -> Result<HashSet<String>> {
 
     let user = auth.current_user.unwrap();
 
-    Auth::<User, i64, sqlx::SqlitePool>::build([axum::http::Method::GET], false)
+    Auth::<User, i64, arium_dioxus::pool::Pool>::build([axum::http::Method::GET], false)
         .requires(Rights::any([
             Rights::permission("Category::View"),
             Rights::permission("Admin::View"),

@@ -64,6 +64,7 @@ pub use arium::oauth;
 #[cfg(feature = "ssr")]
 pub use arium::{
     AuditConfig, AuditCtx, AuthConfig, AuthConfigBuilder, SessionStore, auth, install, migrator,
+    pool,
 };
 
 /// Extract just the human-readable message from a server-fn error surfaced on
