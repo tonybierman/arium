@@ -19,11 +19,14 @@ dioxus-web = { version = "0.7.9", features = ["hydrate"], optional = true }
 arium-dioxus = { path = "../../crates/arium-dioxus", default-features = false, features = [
     "ui",
     "mfa",
+    "webauthn",
     "mail",
     "oauth-github",
     "ratelimit",
     "tokens",
 ] }
+# For constructing the WebAuthn relying-party origin (server-side only).
+url = "2"
 
 # Server-side deps the example still touches directly (sqlx for the pool +
 # migrations, axum_session_auth for the Auth/Rights check in get_permissions).

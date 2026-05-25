@@ -89,6 +89,8 @@ const VERIFY_EMAIL_CSS: Asset =
     asset!("/src/ui/verify_email/style.css", AssetOptions::css_module());
 #[cfg(feature = "mfa")]
 const MFA_CSS: Asset = asset!("/src/ui/mfa/style.css", AssetOptions::css_module());
+#[cfg(feature = "webauthn")]
+const PASSKEY_CSS: Asset = asset!("/src/ui/passkeys/style.css", AssetOptions::css_module());
 #[cfg(feature = "tokens")]
 const TOKENS_CSS: Asset = asset!("/src/ui/tokens/style.css", AssetOptions::css_module());
 
@@ -127,6 +129,12 @@ pub fn AuthStylesheets() -> Element {
             #[cfg(feature = "mfa")]
             rsx! {
                 document::Stylesheet { href: MFA_CSS }
+            }
+        }
+        {
+            #[cfg(feature = "webauthn")]
+            rsx! {
+                document::Stylesheet { href: PASSKEY_CSS }
             }
         }
         {

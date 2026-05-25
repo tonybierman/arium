@@ -1,0 +1,92 @@
+/* Shared auth-screen scaffolding (mirrors the other auth screens — css_module
+   scopes class names per file, so each screen re-declares the base classes). */
+.dx-auth-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    box-sizing: border-box;
+}
+
+.dx-auth-card {
+    width: 100%;
+    max-width: 26rem;
+}
+
+.dx-auth-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    margin-top: 0.75rem;
+}
+
+.dx-auth-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.dx-auth-submit {
+    width: 100%;
+    margin-top: 0.75rem;
+}
+
+.dx-auth-aux {
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+    text-align: center;
+}
+
+.dx-auth-success {
+    font-size: 0.875rem;
+    padding: 0.5rem 0;
+}
+
+.dx-auth-error {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #fca5a5;
+    border-radius: 0.5rem;
+    background-color: #fee2e2;
+    color: #7f1d1d;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+}
+
+/* Enrolled-passkey list. */
+.dx-passkey-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.dx-passkey-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 0.5rem;
+}
+
+.dx-passkey-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    min-width: 0;
+}
+
+.dx-passkey-name {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dx-passkey-sub {
+    font-size: 0.8125rem;
+    opacity: 0.7;
+}

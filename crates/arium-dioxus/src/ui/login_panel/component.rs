@@ -86,6 +86,14 @@ pub fn LoginPanel(
     #[props(default)] forgot_href: Option<&'static str>,
     #[props(default = true)] show_email_password: bool,
     #[props(default)] error: Option<String>,
+    /// Optional passwordless passkey entry. When set, a "Sign in with a passkey"
+    /// button renders below the providers on the sign-in tab; the consumer wires
+    /// it to the discoverable flow (or to [`PasskeySignInButton`](crate::ui::passkeys::PasskeySignInButton)).
+    #[props(default)]
+    on_passkey: Option<EventHandler<()>>,
+    /// Label for the passkey button (only shown when `on_passkey` is set).
+    #[props(default = "Sign in with a passkey")]
+    passkey_label: &'static str,
     on_submit: Option<EventHandler<LoginSubmit>>,
 ) -> Element {
     let mut email = use_signal(String::new);
@@ -284,6 +292,17 @@ pub fn LoginPanel(
                             href: provider.href.clone(),
                             icon_svg: provider.icon_svg.clone(),
                         }
+                    }
+                }
+            }
+
+            if let Some(on_passkey) = on_passkey {
+                if !is_signup {
+                    button {
+                        r#type: "button",
+                        class: Styles::login_provider_button,
+                        onclick: move |_| on_passkey.call(()),
+                        "{passkey_label}"
                     }
                 }
             }

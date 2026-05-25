@@ -1066,6 +1066,10 @@ pub async fn get_account_view() -> Result<AccountView, ServerFnError> {
         email_verified: true, // user is currently signed in, so they verified at some point
         mfa_enabled,
         has_password,
+        // The Leptos adapter doesn't implement passkeys yet (follow-up); always
+        // report none so the shared `AccountView` stays satisfied.
+        has_passkey: false,
+        passkey_count: 0,
         linked_oauth_providers: providers,
     })
 }

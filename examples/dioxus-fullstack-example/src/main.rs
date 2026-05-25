@@ -20,8 +20,9 @@ use arium_dioxus::ui::components::label::Label;
 use arium_dioxus::ui::components::tabs::{TabContent, TabList, TabTrigger, Tabs};
 use arium_dioxus::ui::{
     ApiTokens, ForgotPassword, LoginPanel, LoginSubmit, MfaChallenge, MfaSetup,
-    OAuthProvidersProvider, PermissionGate, PermissionsProvider, Policy, RequirePermission,
-    ResetPassword, SubmitKind, VerifyEmail, use_oauth_providers, use_permissions,
+    OAuthProvidersProvider, PasskeyChallenge, PasskeySetup, PasskeySignInButton, PermissionGate,
+    PermissionsProvider, Policy, RequirePermission, ResetPassword, SubmitKind, VerifyEmail,
+    use_oauth_providers, use_permissions,
 };
 use arium_dioxus::{LoginOutcome, UserProfile, friendly_server_error};
 
@@ -131,6 +132,23 @@ fn main() {
             }
         };
 
+        // WebAuthn / passkeys. The relying-party origin must match the URL the
+        // app is served from; default to the dev `dx serve` origin and allow an
+        // override for other deployments.
+        let webauthn_origin = std::env::var("WEBAUTHN_ORIGIN")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+        let builder = match url::Url::parse(&webauthn_origin) {
+            Ok(origin) => {
+                let rp_id = origin.host_str().unwrap_or("localhost").to_string();
+                println!("[startup] WebAuthn: enabled (rp_id={rp_id}, origin={origin})");
+                builder.webauthn(rp_id, origin, "arium example")
+            }
+            Err(e) => {
+                println!("[startup] WebAuthn: disabled (invalid WEBAUTHN_ORIGIN: {e})");
+                builder
+            }
+        };
+
         let cfg = builder.build()?;
 
         arium_dioxus::install(dioxus::server::router(app), cfg).await
@@ -199,6 +217,7 @@ fn Home() -> Element {
     let mut auth_error = use_signal(String::new);
     let mut pending_email = use_signal::<Option<String>>(|| None);
     let mut pending_mfa = use_signal(|| false);
+    let mut pending_passkey = use_signal(|| false);
 
     let on_login_submit = move |submission: LoginSubmit| {
         auth_error.set(String::new());
@@ -218,6 +237,7 @@ fn Home() -> Element {
                 Ok(LoginOutcome::LoggedIn) => perms.refresh(),
                 Ok(LoginOutcome::EmailUnverified) => pending_email.set(Some(email_for_pending)),
                 Ok(LoginOutcome::MfaRequired) => pending_mfa.set(true),
+                Ok(LoginOutcome::PasskeyRequired) => pending_passkey.set(true),
                 Err(e) => auth_error.set(friendly_server_error(e)),
             }
         });
@@ -254,6 +274,7 @@ fn Home() -> Element {
                             }
                             TabContent { index: 1_usize, value: "mfa".to_string(),
                                 MfaSetup {}
+                                PasskeySetup {}
                             }
                             TabContent { index: 2_usize, value: "tokens".to_string(),
                                 ApiTokens {}
@@ -285,6 +306,20 @@ fn Home() -> Element {
                         });
                     },
                 }
+            } else if pending_passkey() {
+                PasskeyChallenge {
+                    on_logged_in: move |_| {
+                        pending_passkey.set(false);
+                        perms.refresh();
+                    },
+                    on_cancel: move |_| {
+                        pending_passkey.set(false);
+                        auth_error.set(String::new());
+                        spawn(async move {
+                            let _ = cancel_passkey_login().await;
+                        });
+                    },
+                }
             } else if let Some(email) = pending_email() {
                 VerificationPending {
                     email,
@@ -305,6 +340,7 @@ fn Home() -> Element {
                     },
                     on_submit: on_login_submit,
                 }
+                PasskeySignInButton { on_logged_in: move |_| perms.refresh() }
             }
         }
     }

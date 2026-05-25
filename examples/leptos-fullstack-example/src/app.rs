@@ -102,6 +102,10 @@ fn Home() -> impl IntoView {
                 Ok(LoginOutcome::LoggedIn) => perms.refresh(),
                 Ok(LoginOutcome::EmailUnverified) => pending_email.set(Some(email_pending)),
                 Ok(LoginOutcome::MfaRequired) => pending_mfa.set(true),
+                // The Leptos adapter doesn't wire passkeys yet (follow-up); the
+                // server never returns this here, but the match must be total.
+                Ok(LoginOutcome::PasskeyRequired) => auth_error
+                    .set("Passkey sign-in isn't available in this example yet.".to_string()),
                 Err(e) => auth_error.set(friendly_server_error(e)),
             }
         });
