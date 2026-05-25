@@ -38,6 +38,12 @@ examples/*/ffuf-discover.sh
 examples/*/hydra.restore
 examples/*/passwords.txt
 
+# Per-environment deploy config for the examples (infra-specific: SSH host,
+# NPM network, tunnel subdomain). Created ad-hoc to deploy a demo; not part of
+# the shipped example. Pairs with the gitignored `.env` above.
+examples/*/justfile
+examples/*/docker-compose.prod.yml
+
 # Editor / OS junk
 .DS_Store
 .idea/
