@@ -53,6 +53,51 @@ async fn wrong_password_and_unknown_email_are_indistinguishable() {
     assert_eq!(unknown, VerifyOutcome::Invalid);
 }
 
+/// The *message* being identical (the test above) isn't enough: a login
+/// against an unknown email must not return materially faster than a
+/// wrong-password attempt against a real account. Before the fix the
+/// not-found path skipped Argon2 and ran ~25x faster, leaking account
+/// existence via response time; `verify_password_user` now burns an
+/// equivalent dummy verify on that path.
+#[tokio::test]
+async fn unknown_email_is_not_faster_than_wrong_password() {
+    use std::time::Instant;
+
+    let pool = common::pool().await;
+    common::make_user(&pool, "erin@example.com", "hunter22!").await;
+
+    // Warm up: the first call lazily builds the dummy hash and primes caches,
+    // so it must not be one of the timed samples.
+    let _ = auth::verify_password_user(&pool, "erin@example.com", "WRONG").await;
+    let _ = auth::verify_password_user(&pool, "ghost@example.com", "WRONG").await;
+
+    // Minimum of N samples is the cleanest signal — least perturbed by
+    // scheduler noise, and Argon2's fixed cost dominates it.
+    const N: usize = 8;
+    let (mut real, mut fake) = (Vec::with_capacity(N), Vec::with_capacity(N));
+    for _ in 0..N {
+        let t = Instant::now();
+        let _ = auth::verify_password_user(&pool, "erin@example.com", "WRONG").await;
+        real.push(t.elapsed());
+
+        let t = Instant::now();
+        let _ = auth::verify_password_user(&pool, "ghost@example.com", "WRONG").await;
+        fake.push(t.elapsed());
+    }
+    let real_min = *real.iter().min().unwrap();
+    let fake_min = *fake.iter().min().unwrap();
+
+    // The unknown-email path must spend at least half the time the real path
+    // does. Pre-fix it was ~4%; equalized it's ~100%. The 2x margin keeps the
+    // test robust against timing noise while still catching a regression.
+    assert!(
+        fake_min.saturating_mul(2) >= real_min,
+        "unknown-email login returned too fast ({fake_min:?}) vs wrong-password \
+         ({real_min:?}) — Argon2 likely skipped on the not-found path, \
+         re-opening the enumeration timing side-channel",
+    );
+}
+
 #[tokio::test]
 async fn email_lookup_is_case_insensitive_and_whitespace_tolerant() {
     let pool = common::pool().await;
