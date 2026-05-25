@@ -35,104 +35,12 @@ jobs:
       - name: Test workspace
         run: cargo test --workspace --exclude dioxus-fullstack-example
 
-  # Access-control regression gate. Boots the example server headless and runs
-  # the inventory-driven probe (examples/dioxus-fullstack-example/access-control-probe.sh):
-  #   Phase 1 — every protected endpoint must DENY an anonymous caller.
-  #   Phase 2 — every /api/admin/* must REFUSE a logged-in non-admin (vertical
-  #             privilege escalation).
-  #   Phase 3 — one user must not reach another's object by id (horizontal/IDOR:
-  #             B cannot revoke A's API token).
-  # A refactor that silently un-gates an endpoint turns this job red. The probe
-  # script is the source of truth for the access-control surface.
-  access-control:
-    name: access-control probe
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install pinned toolchain
-        run: rustup show
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci
-      # Server-only build: skips the web/wasm devtools stack (the reason the
-      # `test` job excludes this example) and yields a headless API server,
-      # which is all the probe hits.
-      - name: Build example (server only)
-        run: cargo build -p dioxus-fullstack-example --no-default-features --features server
-      - name: Boot the example
-        env:
-          IP: "127.0.0.1"
-          PORT: "8080"                              # dioxus server bind reads IP/PORT
-          DATABASE_URL: "sqlite://${{ runner.temp }}/ac-probe.db?mode=rwc"
-          DX_AUTH_SKIP_EMAIL_VERIFICATION: "1"      # fresh logins get a session (Phases 2/3)
-        run: |
-          BIN=target/debug/dioxus-fullstack-example
-          # dioxus-server serves static assets from `<bin_dir>/public`; a raw
-          # `cargo build` (unlike `dx build`) doesn't create it. Empty dir is fine.
-          mkdir -p "$(dirname "$BIN")/public"
-          nohup "$BIN" > "${{ runner.temp }}/server.log" 2>&1 &
-          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
-      - name: Wait for readiness
-        run: |
-          curl -s --retry 60 --retry-delay 1 --retry-connrefused --max-time 5 \
-            -o /dev/null -w 'server ready: HTTP %{http_code}\n' http://127.0.0.1:8080/
-      - name: Run access-control probe
-        env:
-          NONADMIN_EMAIL: probe-nonadmin@example.com
-        run: bash examples/dioxus-fullstack-example/access-control-probe.sh
-      - name: Server log (on failure)
-        if: failure()
-        run: cat "${{ runner.temp }}/server.log" || true
-      - name: Stop the example
-        if: always()
-        run: kill "${SERVER_PID}" 2>/dev/null || true
-
-  # Same access-control gate for the Leptos adapter, against
-  # leptos-fullstack-example. Leptos server fns are POST-only and form-encoded
-  # (server_fn's PostUrl default), so they have a dedicated probe:
-  # examples/leptos-fullstack-example/access-control-probe.sh (same 3 phases).
-  access-control-leptos:
-    name: access-control probe (leptos)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install pinned toolchain
-        run: rustup show
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci
-      - name: Build example (ssr)
-        run: cargo build -p leptos-fullstack-example --no-default-features --features ssr
-      - name: Boot the example
-        env:
-          LEPTOS_SITE_ADDR: "127.0.0.1:3000"
-          LEPTOS_SITE_ROOT: "${{ runner.temp }}/leptos-site"
-          DATABASE_URL: "sqlite://${{ runner.temp }}/ac-leptos.db?mode=rwc"
-          DX_AUTH_SKIP_EMAIL_VERIFICATION: "1"
-        run: |
-          BIN=target/debug/leptos-fullstack-example
-          # file_and_error_handler serves from the site root; a plain cargo
-          # build (no cargo-leptos) doesn't populate it. Empty dir is fine —
-          # the probe only hits /api plus a non-asset GET /.
-          mkdir -p "${{ runner.temp }}/leptos-site"
-          nohup "$BIN" > "${{ runner.temp }}/leptos.log" 2>&1 &
-          echo "LEPTOS_PID=$!" >> "$GITHUB_ENV"
-      - name: Wait for readiness
-        run: |
-          curl -s --retry 60 --retry-delay 1 --retry-connrefused --max-time 5 \
-            -o /dev/null -w 'server ready: HTTP %{http_code}\n' http://127.0.0.1:3000/
-      - name: Run access-control probe
-        env:
-          HOST: "127.0.0.1"
-          PORT: "3000"
-          NONADMIN_EMAIL: probe-nonadmin@example.com
-        run: bash examples/leptos-fullstack-example/access-control-probe.sh
-      - name: Server log (on failure)
-        if: failure()
-        run: cat "${{ runner.temp }}/leptos.log" || true
-      - name: Stop the example
-        if: always()
-        run: kill "${LEPTOS_PID}" 2>/dev/null || true
+  # Access control is gated by in-process integration tests in the adapter
+  # crates (crates/arium-{dioxus,leptos}/tests/access_control.rs), which the
+  # `test` job above runs as part of the workspace. They boot the real
+  # install-layered router on an ephemeral port and assert the three phases the
+  # old shell probe covered: anonymous denial, non-admin refusal on admin
+  # endpoints, and per-user token-revoke isolation (IDOR).
 
   # Compile-check the realistic feature combos so a future refactor doesn't
   # silently break consumers who turn off `default-features`. Pure

@@ -30,8 +30,8 @@ TODO*.md
 # Local security-testing scratch: the THC-Hydra brute-force script, the
 # hardening-verification harness, and their generated wordlist. Created
 # ad-hoc to exercise an example's auth against credential and authz
-# attacks; not part of the shipped example. (The access-control probe is
-# tracked, not ignored — CI runs it as a regression gate.)
+# attacks; not part of the shipped example. (Access-control regression
+# testing now lives in crates/arium-{dioxus,leptos}/tests/access_control.rs.)
 examples/*/hydra-login-test.sh
 examples/*/harden-verify.sh
 examples/*/ffuf-discover.sh
