@@ -164,6 +164,17 @@ if [[ -z "$pre" || "$pre" == "000" ]]; then
 fi
 echo "target: ${BASE} (preflight ${pre})"
 
+# arium grants the `admin` role to the FIRST account on a fresh DB
+# (auth::maybe_grant_first_admin — "first-user-wins" when no admin exists yet).
+# So on a clean database the first registrant becomes admin, which would make
+# Phase 2's "non-admin" secretly an admin and mask real privilege escalation.
+# Claim that slot up front with a sacrificial admin so every test user below is
+# a genuine non-admin. Harmless on a populated DB: an admin already exists, so
+# this just registers (or no-ops on) an ordinary account. No cookie is saved,
+# so Phase 1 still runs fully anonymous.
+probe POST /api/user/register-password \
+      "$(printf '{"email":"probe-bootstrap-admin@example.com","password":"%s"}' "$NONADMIN_PASS")" >/dev/null
+
 # ---- PHASE 1: anonymous caller must be denied -------------------------------
 run_group "PHASE 1a — PROTECTED endpoints, ANONYMOUS (must deny)" "${PROTECTED[@]}"
 run_group "PHASE 1b — ADMIN endpoints, ANONYMOUS (must deny)"     "${ADMIN[@]}"
