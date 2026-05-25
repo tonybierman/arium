@@ -27,6 +27,14 @@ examples/*/data/
 TODO.md
 TODO*.md
 
+# Local security-testing scratch: the THC-Hydra brute-force script, the
+# hardening-verification harness, and their generated wordlist. Created
+# ad-hoc to exercise an example's auth against credential attacks; not part
+# of the shipped example.
+examples/*/hydra-login-test.sh
+examples/*/harden-verify.sh
+examples/*/passwords.txt
+
 # Editor / OS junk
 .DS_Store
 .idea/
