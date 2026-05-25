@@ -13,20 +13,25 @@ struct Styles;
 
 /// Self-contained passwordless ("discoverable") passkey sign-in button.
 ///
-/// Runs the full ceremony on click —
-/// [`begin_passkey_discoverable`](crate::server::begin_passkey_discoverable) →
-/// the browser `navigator.credentials.get()` bridge →
-/// [`finish_passkey_discoverable`](crate::server::finish_passkey_discoverable)
-/// — and fires `on_logged_in` on success. Drop it next to a `LoginPanel` (or
-/// wire it to the panel's `on_passkey` prop) for a no-password sign-in option.
+/// The discoverable challenge is fetched up front (on mount) so the actual
+/// `navigator.credentials.get()` runs **directly inside the click handler** —
+/// WebAuthn requires a transient user activation, and doing a server round-trip
+/// inside the handler before calling `get()` can consume it (the ceremony then
+/// silently never surfaces). On success fires `on_logged_in`. Drop it next to a
+/// `LoginPanel` (or wire it to the panel's `on_passkey` prop) for a no-password
+/// sign-in option.
 #[component]
 pub fn PasskeySignInButton(
     on_logged_in: EventHandler<()>,
     #[props(default = false)] remember_me: bool,
     #[props(default = "Sign in with a passkey")] label: &'static str,
 ) -> Element {
+    let challenge = use_resource(begin_passkey_discoverable);
     let mut error = use_signal(String::new);
     let mut submitting = use_signal(|| false);
+
+    let options = challenge().and_then(|r| r.ok());
+    let ready = options.is_some();
 
     rsx! {
         document::Stylesheet { href: PASSKEY_CSS }
@@ -36,32 +41,39 @@ pub fn PasskeySignInButton(
         Button {
             variant: ButtonVariant::Outline,
             class: Styles::dx_auth_submit,
-            onclick: move |_| {
-                error.set(String::new());
-                submitting.set(true);
-                spawn(async move {
-                    match begin_passkey_discoverable().await {
-                        Ok(challenge) => {
-                            match webauthn_client::get_credential(&challenge.options_json).await {
-                                Ok(credential_json) => {
-                                    let resp = PasskeyCredentialResponse { credential_json };
-                                    match finish_passkey_discoverable(resp, remember_me).await {
-                                        Ok(LoginOutcome::LoggedIn) => on_logged_in.call(()),
-                                        Ok(_) => {
-                                            error.set("Unexpected response from server.".to_string())
-                                        }
-                                        Err(e) => error.set(friendly_server_error(e)),
+            onclick: {
+                let options = options.clone();
+                move |_| {
+                    let Some(opts) = options.clone() else {
+                        return;
+                    };
+                    error.set(String::new());
+                    submitting.set(true);
+                    spawn(async move {
+                        match webauthn_client::get_credential(&opts.options_json).await {
+                            Ok(credential_json) => {
+                                let resp = PasskeyCredentialResponse { credential_json };
+                                match finish_passkey_discoverable(resp, remember_me).await {
+                                    Ok(LoginOutcome::LoggedIn) => on_logged_in.call(()),
+                                    Ok(_) => {
+                                        error.set("Unexpected response from server.".to_string())
                                     }
+                                    Err(e) => error.set(friendly_server_error(e)),
                                 }
-                                Err(msg) => error.set(msg),
                             }
+                            Err(msg) => error.set(msg),
                         }
-                        Err(e) => error.set(friendly_server_error(e)),
-                    }
-                    submitting.set(false);
-                });
+                        submitting.set(false);
+                    });
+                }
             },
-            if submitting() { "Waiting for your device…" } else { "{label}" }
+            if submitting() {
+                "Waiting for your device…"
+            } else if ready {
+                "{label}"
+            } else {
+                "Preparing…"
+            }
         }
     }
 }
