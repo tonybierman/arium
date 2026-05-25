@@ -34,6 +34,25 @@ impl Default for RateLimitConfig {
     }
 }
 
+/// Relying-party settings for WebAuthn / passkeys. Opt-in like OAuth: when
+/// unset, [`crate::install`] mounts nothing and the passkey server fns report
+/// the feature as unconfigured.
+///
+/// `rp_id` is the registrable domain (e.g. `example.com`, or `localhost` in
+/// dev) and `rp_origin` is the full origin the app is served from (e.g.
+/// `https://example.com`). They must match the browser's location exactly or
+/// ceremonies fail — see the WebAuthn secure-context rules.
+#[cfg(feature = "webauthn")]
+#[derive(Debug, Clone)]
+pub struct WebauthnRp {
+    /// Registrable domain the credentials are scoped to.
+    pub rp_id: String,
+    /// Full origin the app is served from.
+    pub rp_origin: url::Url,
+    /// Human-readable name shown in some authenticator prompts.
+    pub rp_name: String,
+}
+
 /// Audit-log capture/retention settings. Wired into the audit emitter and
 /// the background prune task started by [`crate::install`].
 #[derive(Debug, Clone)]
@@ -85,6 +104,9 @@ pub struct AuthConfig {
     /// `false` by default so plain-HTTP `localhost` dev still works; turn it on
     /// in production (see [`AuthConfigBuilder::cookie_secure`]).
     pub(crate) cookie_secure: bool,
+    /// Relying-party config for passkeys, or `None` to leave WebAuthn off.
+    #[cfg(feature = "webauthn")]
+    pub(crate) webauthn: Option<WebauthnRp>,
 }
 
 /// A conservative `Strict-Transport-Security` value (2 years, subdomains,
@@ -112,6 +134,8 @@ impl AuthConfig {
             hsts: None,
             csp: None,
             cookie_secure: false,
+            #[cfg(feature = "webauthn")]
+            webauthn: None,
         }
     }
 
@@ -132,6 +156,8 @@ impl AuthConfig {
             hsts: None,
             csp: None,
             cookie_secure: false,
+            #[cfg(feature = "webauthn")]
+            webauthn: None,
         }
     }
 }
@@ -153,6 +179,8 @@ pub struct AuthConfigBuilder {
     hsts: Option<String>,
     csp: Option<String>,
     cookie_secure: bool,
+    #[cfg(feature = "webauthn")]
+    webauthn: Option<WebauthnRp>,
 }
 
 impl AuthConfigBuilder {
@@ -250,6 +278,28 @@ impl AuthConfigBuilder {
         self
     }
 
+    /// Enable WebAuthn / passkeys for the given relying party. Off by default
+    /// (like OAuth); without this call the passkey endpoints stay unmounted.
+    ///
+    /// `rp_id` is the registrable domain (`example.com`, or `localhost` in
+    /// dev), `rp_origin` the full served origin (`https://example.com`), and
+    /// `rp_name` a human-readable label. WebAuthn requires a secure context
+    /// (HTTPS, or `http://localhost`) and the origin must match exactly.
+    #[cfg(feature = "webauthn")]
+    pub fn webauthn(
+        mut self,
+        rp_id: impl Into<String>,
+        rp_origin: url::Url,
+        rp_name: impl Into<String>,
+    ) -> Self {
+        self.webauthn = Some(WebauthnRp {
+            rp_id: rp_id.into(),
+            rp_origin,
+            rp_name: rp_name.into(),
+        });
+        self
+    }
+
     /// Enable the `Strict-Transport-Security` response header with the given
     /// value (e.g. [`RECOMMENDED_HSTS`]). Off by default.
     ///
@@ -310,6 +360,8 @@ impl AuthConfigBuilder {
             hsts: self.hsts,
             csp: self.csp,
             cookie_secure: self.cookie_secure,
+            #[cfg(feature = "webauthn")]
+            webauthn: self.webauthn,
         })
     }
 }

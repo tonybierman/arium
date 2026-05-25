@@ -109,6 +109,14 @@ pub async fn install(router: Router, cfg: AuthConfig) -> anyhow::Result<Router> 
         router = router.layer(axum::Extension(cfg.mailer.clone()));
     }
 
+    // WebAuthn relying party. Opt-in: only attached when the consumer supplied
+    // rp config. Server fns extract the shared `Arc<Webauthn>` to run ceremonies.
+    #[cfg(feature = "webauthn")]
+    if let Some(rp) = cfg.webauthn.as_ref() {
+        let webauthn = crate::webauthn::build_webauthn(&rp.rp_id, &rp.rp_origin, &rp.rp_name)?;
+        router = router.layer(axum::Extension(std::sync::Arc::new(webauthn)));
+    }
+
     // 3b) Background audit-log prune. No-ops when retention_days == 0.
     if cfg.audit.retention_days > 0 {
         let prune_pool = cfg.pool.clone();

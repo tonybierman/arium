@@ -15,7 +15,7 @@ readme = "README.md"
 path = "src/lib.rs"
 
 [features]
-default = ["sqlite", "oauth-github", "mfa", "mail", "ratelimit", "tokens"]
+default = ["sqlite", "oauth-github", "mfa", "mail", "ratelimit", "tokens", "webauthn"]
 
 # Backend selection — pick exactly one.
 sqlite = ["sqlx/sqlite", "axum_session_sqlx/sqlite"]
@@ -39,6 +39,11 @@ oauth-oidc = ["_oauth-core", "dep:openidconnect"]
 oauth-google = ["oauth-oidc"]
 oauth-microsoft = ["oauth-oidc"]
 mfa = ["dep:totp-rs"]
+# Passkeys / WebAuthn. `danger-allow-state-serialisation` lets the in-progress
+# ceremony state (PasskeyRegistration / PasskeyAuthentication) round-trip through
+# the session like the OAuth `state`; `conditional-ui` enables the discoverable
+# (usernameless / passwordless) authentication API.
+webauthn = ["dep:webauthn-rs", "dep:url", "dep:uuid", "dep:serde_json", "dep:base64"]
 mail = ["dep:lettre"]
 ratelimit = ["dep:tower_governor"]
 tokens = ["dep:sha2"]
@@ -84,6 +89,11 @@ lettre = { version = "0.11", default-features = false, features = [
 tower_governor = { version = "0.8", default-features = false, features = ["axum"], optional = true }
 totp-rs = { version = "5", features = ["qr", "gen_secret"], optional = true }
 sha2 = { version = "0.11", optional = true }
+webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "conditional-ui"], optional = true }
+url = { version = "2", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+serde_json = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "fs", "net"] }

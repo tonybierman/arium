@@ -1310,6 +1310,13 @@ pub mod audit {
     /// MFA was turned off on the account.
     pub const USER_MFA_DISABLED: &str = "user.mfa.disabled";
 
+    /// A passkey (WebAuthn credential) was registered.
+    pub const USER_PASSKEY_REGISTERED: &str = "user.passkey.registered";
+    /// A passkey was removed from the account.
+    pub const USER_PASSKEY_REVOKED: &str = "user.passkey.revoked";
+    /// A passkey was used to authenticate (as a second factor or passwordless).
+    pub const USER_PASSKEY_LOGIN: &str = "user.passkey.login";
+
     /// A new API token was minted.
     pub const USER_API_TOKEN_CREATED: &str = "user.api_token.created";
     /// An API token was revoked.
