@@ -20,9 +20,9 @@ use arium_dioxus::ui::components::label::Label;
 use arium_dioxus::ui::components::tabs::{TabContent, TabList, TabTrigger, Tabs};
 use arium_dioxus::ui::{
     ApiTokens, ForgotPassword, LoginPanel, LoginSubmit, MfaChallenge, MfaSetup,
-    OAuthProvidersProvider, PasskeyChallenge, PasskeySetup, PasskeySignInButton, PermissionGate,
-    PermissionsProvider, Policy, RequirePermission, ResetPassword, SubmitKind, VerifyEmail,
-    use_oauth_providers, use_permissions,
+    OAuthProvidersProvider, PasskeyChallenge, PasskeyConditionalSignIn, PasskeySetup,
+    PermissionGate, PermissionsProvider, Policy, RequirePermission, ResetPassword, SubmitKind,
+    VerifyEmail, use_oauth_providers, use_permissions,
 };
 use arium_dioxus::{LoginOutcome, UserProfile, friendly_server_error};
 
@@ -147,6 +147,37 @@ fn main() {
                 println!("[startup] WebAuthn: disabled (invalid WEBAUTHN_ORIGIN: {e})");
                 builder
             }
+        };
+
+        // HTTPS hardening. When we're actually served over https (inferred from
+        // WEBAUTHN_ORIGIN), exercise arium's "Deploying behind HTTPS" knobs: a
+        // Secure session cookie, HSTS, and a CSP. Gated so plain-http localhost
+        // dev isn't broken — a Secure cookie or HSTS there would lock you out.
+        let builder = if webauthn_origin.starts_with("https://") {
+            let hsts = std::env::var("HSTS").unwrap_or_default();
+            // A Dioxus app hydrates from wasm + an inline bootstrap script, so
+            // the policy must permit them; override via env to tune further.
+            let csp = std::env::var("CONTENT_SECURITY_POLICY").unwrap_or_else(|_| {
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'; \
+                 style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; \
+                 connect-src 'self'"
+                    .to_string()
+            });
+            println!(
+                "[startup] HTTPS hardening: cookie_secure=on, csp=on, hsts={}",
+                if hsts.trim().is_empty() {
+                    "off"
+                } else {
+                    hsts.as_str()
+                }
+            );
+            let mut b = builder.cookie_secure(true).content_security_policy(csp);
+            if !hsts.trim().is_empty() {
+                b = b.hsts(hsts);
+            }
+            b
+        } else {
+            builder
         };
 
         let cfg = builder.build()?;
@@ -334,13 +365,19 @@ fn Home() -> Element {
                     title: "Welcome back",
                     description: "Sign in to your workspace.",
                     forgot_href: "/auth/forgot",
+                    // Mark the email field for passkey autofill; the conditional
+                    // component below runs the background ceremony.
+                    passkey_autofill: true,
                     error: {
                         let e = auth_error();
                         if e.is_empty() { None } else { Some(e) }
                     },
                     on_submit: on_login_submit,
                 }
-                PasskeySignInButton { on_logged_in: move |_| perms.refresh() }
+                // Conditional-UI (autofill) passwordless sign-in — the reliable
+                // trigger on Safari/iOS. Renders nothing; surfaces passkeys in
+                // the email field's autofill menu.
+                PasskeyConditionalSignIn { on_logged_in: move |_| perms.refresh() }
             }
         }
     }

@@ -54,7 +54,7 @@ pub use login_panel::{LoginPanel, LoginProvider, LoginSubmit, SubmitKind};
 pub use mfa::{MfaChallenge, MfaSetup};
 pub use oauth_providers::{OAuthProvidersProvider, use_oauth_providers};
 #[cfg(feature = "webauthn")]
-pub use passkeys::{PasskeyChallenge, PasskeySetup, PasskeySignInButton};
+pub use passkeys::{PasskeyChallenge, PasskeyConditionalSignIn, PasskeySetup, PasskeySignInButton};
 pub use permissions::{
     PermissionGate, PermissionSet, PermissionsProvider, Policy, RequirePermission, UsePermissions,
     use_permissions,

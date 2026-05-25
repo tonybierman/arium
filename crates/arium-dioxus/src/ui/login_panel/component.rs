@@ -94,6 +94,12 @@ pub fn LoginPanel(
     /// Label for the passkey button (only shown when `on_passkey` is set).
     #[props(default = "Sign in with a passkey")]
     passkey_label: &'static str,
+    /// Mark the email field with `autocomplete="username webauthn"` so the
+    /// browser offers enrolled passkeys in its autofill menu (conditional UI).
+    /// Pair with [`PasskeyConditionalSignIn`](crate::ui::PasskeyConditionalSignIn),
+    /// which runs the background `mediation: conditional` ceremony.
+    #[props(default)]
+    passkey_autofill: bool,
     on_submit: Option<EventHandler<LoginSubmit>>,
 ) -> Element {
     let mut email = use_signal(String::new);
@@ -121,6 +127,14 @@ pub fn LoginPanel(
         "Don't have an account?"
     };
     let toggle_action_label = if is_signup { "Sign in" } else { "Sign up" };
+
+    // For conditional-UI passkeys the sign-in email field needs the `webauthn`
+    // autocomplete token so the browser surfaces passkeys in its autofill menu.
+    let email_autocomplete = if passkey_autofill && !is_signup {
+        "username webauthn"
+    } else {
+        "email"
+    };
 
     // Prefer the inline (client-side) error; fall back to the parent-supplied one.
     let displayed_error = {
@@ -185,7 +199,7 @@ pub fn LoginPanel(
                             id: "login-email",
                             name: "email",
                             r#type: "email",
-                            autocomplete: "email",
+                            autocomplete: email_autocomplete,
                             placeholder: "{email_placeholder}",
                             value: "{email}",
                             oninput: move |evt: FormEvent| email.set(evt.value()),

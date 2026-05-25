@@ -165,6 +165,7 @@ dependencies = [
  "dioxus-icons",
  "dioxus-primitives",
  "gloo-timers 0.4.0",
+ "js-sys",
  "reqwest",
  "serde",
  "serde_json",

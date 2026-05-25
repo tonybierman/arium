@@ -47,6 +47,7 @@ webauthn = [
     "arium?/webauthn",
     "dep:serde_json",
     "dep:web-sys",
+    "dep:js-sys",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:webauthn-rs-proto",
@@ -96,6 +97,7 @@ web-sys = { version = "0.3", optional = true, features = [
     "CredentialCreationOptions",
     "CredentialRequestOptions",
 ] }
+js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 webauthn-rs-proto = { version = "0.5.5", default-features = false, features = ["wasm"], optional = true }

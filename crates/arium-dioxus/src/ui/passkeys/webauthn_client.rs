@@ -56,6 +56,42 @@ pub async fn get_credential(options_json: &str) -> Result<String, String> {
     serde_json::to_string(&assertion).map_err(|e| e.to_string())
 }
 
+/// Like [`get_credential`], but with `mediation: conditional` — the assertion
+/// is offered through the browser's *autofill* UI (conditional UI) instead of a
+/// modal sheet. The returned future resolves only when the user picks a passkey
+/// from the autofill menu of a field marked `autocomplete="… webauthn"`. This
+/// is the passwordless trigger Safari/iOS handle reliably.
+#[cfg(all(target_arch = "wasm32", feature = "webauthn"))]
+pub async fn get_credential_conditional(options_json: &str) -> Result<String, String> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+    use webauthn_rs_proto::{PublicKeyCredential, RequestChallengeResponse};
+
+    let rcr: RequestChallengeResponse =
+        serde_json::from_str(options_json).map_err(|e| format!("invalid request options: {e}"))?;
+    let options: web_sys::CredentialRequestOptions = rcr.into();
+    // web-sys 0.3 has no typed `mediation` setter, so set it on the options
+    // object directly. Per spec, a browser without conditional support rejects
+    // the get() (so this never accidentally surfaces a modal sheet on load).
+    js_sys::Reflect::set(
+        options.as_ref(),
+        &wasm_bindgen::JsValue::from_str("mediation"),
+        &wasm_bindgen::JsValue::from_str("conditional"),
+    )
+    .map_err(js_error)?;
+
+    let promise = credentials_container()?
+        .get_with_options(&options)
+        .map_err(js_error)?;
+    let value = JsFuture::from(promise).await.map_err(js_error)?;
+    let credential: web_sys::PublicKeyCredential = value
+        .dyn_into()
+        .map_err(|_| "browser did not return a PublicKeyCredential".to_string())?;
+
+    let assertion = PublicKeyCredential::from(credential);
+    serde_json::to_string(&assertion).map_err(|e| e.to_string())
+}
+
 #[cfg(all(target_arch = "wasm32", feature = "webauthn"))]
 fn credentials_container() -> Result<web_sys::CredentialsContainer, String> {
     let window = web_sys::window().ok_or("no browser window")?;
@@ -80,5 +116,11 @@ pub async fn create_credential(_options_json: &str) -> Result<String, String> {
 /// Server-build stub: the ceremony can only run in the browser.
 #[cfg(all(not(target_arch = "wasm32"), feature = "webauthn"))]
 pub async fn get_credential(_options_json: &str) -> Result<String, String> {
+    Err("passkeys are only available in the browser".to_string())
+}
+
+/// Server-build stub: the ceremony can only run in the browser.
+#[cfg(all(not(target_arch = "wasm32"), feature = "webauthn"))]
+pub async fn get_credential_conditional(_options_json: &str) -> Result<String, String> {
     Err("passkeys are only available in the browser".to_string())
 }
