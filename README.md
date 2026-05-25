@@ -116,9 +116,8 @@ by default:
   security-leaning `clippy` lints gate every PR, with nightly `trufflehog`,
   `cargo geiger`, and `cargo outdated` sweeps.
 
-Full threat model and the hardening rationale behind each item →
-[SECURITY.md](SECURITY.md). Found a vulnerability? Please report it privately
-(see [SECURITY.md](SECURITY.md)) rather than opening a public issue.
+See [SECURITY.md](SECURITY.md) for the full threat model, the hardening
+rationale behind each item, and how to report a vulnerability privately.
 
 ## Contributing
 
