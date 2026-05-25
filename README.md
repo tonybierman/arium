@@ -99,6 +99,27 @@ when its config is absent. Full feature and env-var reference:
 Branding and theming the drop-in UI (shared across both adapters) →
 [CUSTOMIZING.md](CUSTOMIZING.md).
 
+## Security
+
+Auth is the part of your app most worth getting right, so arium ships hardened
+by default:
+
+- **Password handling:** Argon2id hashing; sign-in runs a verify on every
+  attempt — including unknown emails — so timing can't enumerate accounts.
+- **Sessions & MFA:** single-use TOTP recovery codes (enforced at the DB
+  layer), OAuth CSRF `state` verification, and secure response headers stamped
+  on every response; `Secure` cookies, HSTS, and CSP are one builder call away
+  for HTTPS deployments.
+- **Abuse resistance:** per-IP rate limiting and an append-only audit log of
+  auth and admin events.
+- **Supply chain (CI-enforced):** `cargo audit`, `cargo deny`, `gitleaks`, and
+  security-leaning `clippy` lints gate every PR, with nightly `trufflehog`,
+  `cargo geiger`, and `cargo outdated` sweeps.
+
+Full threat model and the hardening rationale behind each item →
+[SECURITY.md](SECURITY.md). Found a vulnerability? Please report it privately
+(see [SECURITY.md](SECURITY.md)) rather than opening a public issue.
+
 ## Contributing
 
 Issues and pull requests are welcome at
@@ -119,8 +140,6 @@ Conventions:
   `src/lib.rs`, then run `cargo rdme -w <crate>` — CI fails if they drift.
 - Never edit an already-applied sqlx migration. sqlx checksums migration
   files; changing one breaks startup. Add a new migration instead.
-- Security issues: see [SECURITY.md](SECURITY.md) — please report privately
-  rather than opening a public issue.
 
 ## License
 
