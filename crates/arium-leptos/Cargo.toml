@@ -15,7 +15,7 @@ readme = "README.md"
 path = "src/lib.rs"
 
 [features]
-default = ["ssr", "ui", "sqlite", "oauth-github", "mfa", "mail", "ratelimit", "tokens"]
+default = ["ssr", "ui", "sqlite", "oauth-github", "mfa", "mail", "ratelimit", "tokens", "sql-membership"]
 
 # Server build. Pulls the engine + axum integration in and turns on Leptos's
 # SSR runtime. Mirrors arium-dioxus's `server` feature, but Leptos selects
@@ -55,6 +55,8 @@ mfa = ["arium?/mfa"]
 mail = ["arium?/mail"]
 ratelimit = ["arium?/ratelimit"]
 tokens = ["arium?/tokens"]
+# Bundled per-resource membership store; off-able by apps with their own table.
+sql-membership = ["arium?/sql-membership"]
 
 [dependencies]
 leptos = { version = "0.8", default-features = false }

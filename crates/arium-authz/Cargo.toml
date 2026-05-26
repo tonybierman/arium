@@ -1,0 +1,50 @@
+[package]
+name = "arium-authz"
+version.workspace = true
+edition.workspace = true
+description = "Per-resource (relationship-based) authorization: a role lattice, default-deny enforcement, and the membership lifecycle (grant/revoke/transfer) — storage-agnostic, framework-agnostic."
+keywords = ["authorization", "rbac", "rebac", "permissions", "sqlx"]
+categories = ["authentication", "web-programming"]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = ["lifecycle"]
+
+# The membership lifecycle layer (MembershipStore + TxExec + grant/revoke/
+# transfer composites). Off → only the read-only `require_resource` enforcement
+# core remains, and the sqlx-transaction surface disappears. On by default so
+# the common case "just works".
+lifecycle = ["dep:sqlx"]
+
+# Backend selection — forwarded down to arium-pool (and to the optional sqlx
+# dep when `lifecycle` is on). A depender enables exactly one.
+sqlite = ["arium-pool/sqlite", "sqlx?/sqlite"]
+postgres = ["arium-pool/postgres", "sqlx?/postgres"]
+
+[dependencies]
+arium-wire = { workspace = true }
+arium-pool = { workspace = true }
+async-trait = "0.1.88"
+anyhow = "1.0.98"
+serde = { version = "1.0.225", features = ["derive"] }
+# Only the lifecycle layer touches sqlx (TxExec wraps sqlx::Transaction).
+sqlx = { version = "0.8.6", default-features = false, features = [
+    "runtime-tokio",
+], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
+sqlx = { version = "0.8.6", default-features = false, features = [
+    "runtime-tokio",
+    "sqlite",
+    "macros",
+] }
+async-trait = "0.1.88"
+anyhow = "1"

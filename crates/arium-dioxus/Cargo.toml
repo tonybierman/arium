@@ -18,7 +18,7 @@ readme = "README.md"
 path = "src/lib.rs"
 
 [features]
-default = ["server", "ui", "sqlite", "oauth-github", "mfa", "mail", "ratelimit", "tokens"]
+default = ["server", "ui", "sqlite", "oauth-github", "mfa", "mail", "ratelimit", "tokens", "sql-membership"]
 
 # Pulls the server engine in and turns on Dioxus's server runtime. The
 # `arium` dep is target-gated to non-wasm below, so enabling `server` on a
@@ -43,6 +43,9 @@ mfa = ["arium?/mfa"]
 mail = ["arium?/mail"]
 ratelimit = ["arium?/ratelimit"]
 tokens = ["arium?/tokens"]
+# Bundled per-resource membership store (`SqlMembershipStore` + its migrator).
+# Off-able by apps that own their own membership table.
+sql-membership = ["arium?/sql-membership"]
 
 [dependencies]
 dioxus = { version = "0.7.9", features = ["fullstack", "router"] }

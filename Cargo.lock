@@ -123,6 +123,8 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "argon2",
+ "arium-authz",
+ "arium-pool",
  "arium-wire",
  "async-trait",
  "axum",
@@ -147,6 +149,19 @@ dependencies = [
  "tower_governor",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "arium-authz"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "arium-pool",
+ "arium-wire",
+ "async-trait",
+ "serde",
+ "sqlx",
+ "tokio",
 ]
 
 [[package]]
@@ -191,10 +206,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arium-pool"
+version = "0.1.2"
+dependencies = [
+ "sqlx",
+]
+
+[[package]]
 name = "arium-wire"
 version = "0.1.2"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -15,11 +15,14 @@ readme = "README.md"
 path = "src/lib.rs"
 
 [features]
-default = ["sqlite", "oauth-github", "mfa", "mail", "ratelimit", "tokens"]
+default = ["sqlite", "oauth-github", "mfa", "mail", "ratelimit", "tokens", "sql-membership"]
 
-# Backend selection — pick exactly one.
-sqlite = ["sqlx/sqlite", "axum_session_sqlx/sqlite"]
-postgres = ["sqlx/postgres", "axum_session_sqlx/postgres"]
+# Backend selection — pick exactly one. Forwarded to arium-pool (the shared
+# source of truth for the Pool type + backend guard) and arium-authz; the
+# latter's `lifecycle` feature is added here since the workspace dep pulls it
+# with default-features off.
+sqlite = ["sqlx/sqlite", "axum_session_sqlx/sqlite", "arium-pool/sqlite", "arium-authz/sqlite", "arium-authz/lifecycle"]
+postgres = ["sqlx/postgres", "axum_session_sqlx/postgres", "arium-pool/postgres", "arium-authz/postgres", "arium-authz/lifecycle"]
 
 # Optional per-capability features. All on by default; turn individual
 # ones off to slim the build down (e.g. an OAuth-only app can drop
@@ -43,9 +46,20 @@ mail = ["dep:lettre"]
 ratelimit = ["dep:tower_governor"]
 tokens = ["dep:sha2"]
 
+# Batteries-included per-resource membership storage: the `SqlMembershipStore`
+# over the `arium_resource_members` table, plus the `membership_migrator()` that
+# creates it. Apps that own their own membership table (and implement
+# `MembershipStore` over it) turn this OFF so the table is never created — the
+# `dead table` is opt-in, not forced on every consumer. Needs `lifecycle`,
+# already pulled by the backend feature.
+sql-membership = []
+
 [dependencies]
 arium-wire = { workspace = true }
+arium-pool = { workspace = true }
+arium-authz = { workspace = true }
 serde = { version = "1.0.225", features = ["derive"] }
+serde_json = "1"
 anyhow = "1.0.98"
 
 # This crate is server-only — it never compiles for wasm, so the heavy

@@ -48,6 +48,17 @@ and `oauth-microsoft` features add a generic OpenID Connect provider plus
 Google/Microsoft presets — each `from_env()`-constructed and registered the
 same way as `GithubProvider` above.
 
+### Per-resource authorization
+
+Beyond global RBAC (flat permission tokens), the [`authz`] module adds
+relationship-based checks — "what role does this user hold on *this*
+resource?" Implement [`authz::ResourceAuthority`] over your own membership
+storage and guard resource-scoped mutations with
+[`require_resource`](authz::require_resource); it does a fresh per-request
+lookup and default-denies. arium ships no membership table — the app owns
+that storage; arium owns the enforcement boundary and the [`ResourceRole`]
+lattice.
+
 <!-- cargo-rdme end -->
 
 ## Installation

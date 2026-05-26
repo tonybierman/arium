@@ -51,7 +51,9 @@ pub const DEFAULT_THEME_CSS: &str = include_str!("../assets/dx-components-theme.
 pub use arium_wire as wire;
 #[cfg(feature = "tokens")]
 pub use arium_wire::{ApiTokenView, CreateApiTokenResponse};
-pub use arium_wire::{LoginOutcome, MfaSetupView, MfaStatusView, ProviderInfo, UserProfile};
+pub use arium_wire::{
+    LoginOutcome, MfaSetupView, MfaStatusView, ProviderInfo, ResourceRole, UserProfile,
+};
 
 // Server-side engine API, re-exported for fullstack consumers. Present only on
 // the `ssr` build (the `arium` dep is gated to the `ssr` feature).
@@ -63,9 +65,20 @@ pub use arium::RateLimitConfig;
 pub use arium::oauth;
 #[cfg(feature = "ssr")]
 pub use arium::{
-    AuditConfig, AuditCtx, AuthConfig, AuthConfigBuilder, SessionStore, auth, install, migrator,
-    pool,
+    AuditConfig, AuditCtx, AuthConfig, AuthConfigBuilder, AuthUser, AuthzCtx, Membership,
+    MembershipError, MembershipStore, ResourceAuthority, ResourceAuthorityExt, ResourceAuthzError,
+    ResourceGrant, ResourceRef, SessionStore, SharedResourceAuthority, TxExec, auth, authz,
+    grant_membership, install, membership, migrator, pool, require_resource,
+    require_resource_or_permission, revoke_membership, transfer_ownership,
 };
+// Bearer-token auth: the `ApiKeyUser` extension the `AuthUser`/`AuthzCtx`
+// extractors honor (middleware applied by `install`).
+#[cfg(all(feature = "ssr", feature = "tokens"))]
+pub use arium::ApiKeyUser;
+// Bundled per-resource membership store + migrator. Opt-in (off for apps that
+// own their own membership table).
+#[cfg(all(feature = "ssr", feature = "sql-membership"))]
+pub use arium::{SqlMembershipStore, membership_migrator};
 
 /// Extract just the human-readable message from a server-fn error surfaced on
 /// the client. Leptos wraps server errors as

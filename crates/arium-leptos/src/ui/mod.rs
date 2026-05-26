@@ -39,6 +39,8 @@ pub mod oauth_providers;
 pub mod permissions;
 /// Route-level guard that bounces unauthenticated visitors.
 pub mod require_auth;
+/// Per-resource UI gate driven by the caller's role on one resource.
+pub mod resource_gate;
 
 pub use account::AccountSettings;
 pub use admin::{AdminRoleEditor, AdminRoleList, AdminUserDetail, AdminUserList, AuditLog};
@@ -56,6 +58,7 @@ pub use permissions::{
 pub use require_auth::RequireAuth;
 #[cfg(feature = "mail")]
 pub use reset_password::ResetPassword;
+pub use resource_gate::{ResourceGate, use_resource_role};
 #[cfg(feature = "tokens")]
 pub use tokens::ApiTokens;
 pub use verify_email::VerifyEmail;

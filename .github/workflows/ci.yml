@@ -74,6 +74,14 @@ jobs:
           - { package: arium-leptos, features: "ssr,sqlite,tokens" }
           - { package: arium-leptos, features: "ssr,sqlite,ui,oauth-github,mfa,mail,ratelimit,tokens" }
           - { package: arium-leptos, features: "ssr,postgres,oauth-github,oauth-google,oauth-microsoft,mfa,mail,ratelimit,tokens" }
+          # arium-authz: the `lifecycle` default is dropped by --no-default-features,
+          # so these explicitly cover both axes — lifecycle on/off × backend. The
+          # lifecycle-off rows are the enforcement-only core (no sqlx surface),
+          # which no other job compiles.
+          - { package: arium-authz, features: "sqlite" }
+          - { package: arium-authz, features: "postgres" }
+          - { package: arium-authz, features: "lifecycle,sqlite" }
+          - { package: arium-authz, features: "lifecycle,postgres" }
     steps:
       - uses: actions/checkout@v6
       - name: Install pinned toolchain
@@ -266,7 +274,7 @@ jobs:
       - run: cargo install --locked cargo-rdme
       - name: Check READMEs are in sync with doc comments
         run: |
-          for crate in arium arium-dioxus arium-leptos arium-wire; do
+          for crate in arium arium-authz arium-dioxus arium-leptos arium-pool arium-wire; do
             echo "::group::cargo rdme --check -w $crate"
             cargo rdme --check -w "$crate"
             echo "::endgroup::"

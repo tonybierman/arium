@@ -35,6 +35,8 @@ pub mod require_auth;
 /// Password-reset form consumed from the link in the reset email.
 #[cfg(feature = "mail")]
 pub mod reset_password;
+/// Per-resource UI gate driven by the caller's role on one resource.
+pub mod resource_gate;
 /// API-token management UI (create / list / revoke).
 #[cfg(feature = "tokens")]
 pub mod tokens;
@@ -57,6 +59,7 @@ pub use permissions::{
 pub use require_auth::RequireAuth;
 #[cfg(feature = "mail")]
 pub use reset_password::ResetPassword;
+pub use resource_gate::{ResourceGate, use_resource_role};
 #[cfg(feature = "tokens")]
 pub use tokens::ApiTokens;
 pub use verify_email::VerifyEmail;

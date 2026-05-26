@@ -1,0 +1,28 @@
+[package]
+name = "arium-pool"
+version.workspace = true
+edition.workspace = true
+description = "Compile-time sqlx backend selection (Pool/DbBackend/DbConnection) shared by the arium engine and arium-authz."
+keywords = ["sqlx", "sqlite", "postgres", "database"]
+categories = ["database"]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# Backend selection — a depender enables exactly one. No default: the backend
+# is chosen at the top of the dependency tree (the auth engine / app) and
+# forwarded down, so every crate agrees on one `Pool` type.
+sqlite = ["sqlx/sqlite"]
+postgres = ["sqlx/postgres"]
+
+[dependencies]
+sqlx = { version = "0.8.6", default-features = false, features = [
+    "macros",
+    "runtime-tokio",
+] }

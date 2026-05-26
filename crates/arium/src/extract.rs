@@ -9,6 +9,24 @@
 /// Per-request session store axum exposes for the active backend.
 pub type SessionStore = axum_session::Session<crate::pool::SessionPool>;
 
+/// Minimal JSON string escaping for audit `details` built in core (which has no
+/// runtime `serde_json` dependency — that's dev-only here).
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len().saturating_add(2));
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Bundle of audit-relevant request info pulled out by the extractor below.
 /// Handlers consume this and pass it through to [`AuditCtx::record`].
 #[derive(Debug, Clone, Default)]
@@ -102,5 +120,211 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for AuditCtx {
             ip,
             user_agent,
         }))
+    }
+}
+
+/// Resolve the acting user id from the request: the bearer-token
+/// [`ApiKeyUser`](crate::api_key::ApiKeyUser) extension (preferred, when the
+/// `tokens` feature is on and [`install`](crate::install) layered the
+/// middleware) then the session cookie. Anonymous / unauthenticated callers
+/// resolve to `None`. Shared by [`AuthUser`] and [`AuthzCtx`] so both honor API
+/// tokens identically.
+async fn resolve_user_id<S: Send + Sync>(
+    parts: &mut axum::http::request::Parts,
+    state: &S,
+) -> Option<i64> {
+    #[cfg(feature = "tokens")]
+    if let Some(api) = parts.extensions.get::<crate::api_key::ApiKeyUser>() {
+        return Some(api.user_id);
+    }
+    match <crate::auth::Session as axum::extract::FromRequestParts<S>>::from_request_parts(
+        parts, state,
+    )
+    .await
+    {
+        Ok(session) => session
+            .current_user
+            .as_ref()
+            .filter(|u| !u.anonymous)
+            .map(|u| u.id as i64),
+        Err(_) => None,
+    }
+}
+
+/// The authenticated acting user for a server fn — resolved from an API token
+/// (`Authorization: Bearer`, when the `tokens` feature is on) or the session
+/// cookie, via [`resolve_user_id`]. Extraction rejects with `401` when neither
+/// path yields a non-anonymous user, so a handler can take `user: AuthUser` and
+/// trust `user.id` is a real, logged-in caller.
+///
+/// This replaces the bespoke "API-key-or-session" extractor apps used to hand-
+/// roll on top of arium's session: depend on `tokens` and take `AuthUser`.
+#[derive(Clone, Copy, Debug)]
+pub struct AuthUser {
+    /// The authenticated caller's user id.
+    pub id: i64,
+}
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for AuthUser {
+    type Rejection = (axum::http::StatusCode, &'static str);
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        match resolve_user_id(parts, state).await {
+            Some(id) => Ok(AuthUser { id }),
+            None => Err((axum::http::StatusCode::UNAUTHORIZED, "not logged in")),
+        }
+    }
+}
+
+/// One-stop resource-authz context for server fns: it bundles the caller's user
+/// id (resolved from an API token or the session), the db pool, the app's
+/// [`ResourceAuthority`](crate::authz::ResourceAuthority), and an [`AuditCtx`],
+/// so a handler authorizes a resource action in a single line:
+///
+/// ```rust,ignore
+/// #[server]
+/// async fn rename_board(board_id: i64, name: String) -> Result<(), ServerFnError> {
+///     let ctx: AuthzCtx = extract().await?;
+///     ctx.require("board", board_id, ResourceRole::Editor).await?; // 403 unless >= Editor
+///     // ... authorized
+/// }
+/// ```
+///
+/// This is the documented general-case guard. It honors API tokens out of the
+/// box — the caller is resolved from the bearer-token extension (when the
+/// `tokens` feature is on) before the session — so the same guard covers both
+/// browser and programmatic clients.
+///
+/// Rejects with `500` when the db pool or authority extension is missing — a
+/// wiring bug, surfaced loudly rather than as a silent deny.
+pub struct AuthzCtx {
+    user_id: Option<i64>,
+    db: crate::pool::Pool,
+    authority: crate::authz::SharedResourceAuthority,
+    audit: AuditCtx,
+}
+
+impl AuthzCtx {
+    /// The authenticated caller's user id, or `None` for an anonymous request.
+    pub fn user_id(&self) -> Option<i64> {
+        self.user_id
+    }
+
+    /// Authorize a resource-scoped action: returns the caller's user id when
+    /// they hold at least `min_role` on `(kind, id)`, else
+    /// [`ResourceAuthzError::Forbidden`](crate::authz::ResourceAuthzError); a
+    /// storage failure surfaces as `Lookup`. An authenticated-but-denied
+    /// outcome writes a `resource.access.denied` audit row.
+    pub async fn require(
+        &self,
+        kind: &str,
+        id: i64,
+        min_role: crate::wire::ResourceRole,
+    ) -> Result<i64, crate::authz::ResourceAuthzError> {
+        let uid = match self.user_id {
+            Some(uid) => uid,
+            None => return Err(crate::authz::ResourceAuthzError::Forbidden),
+        };
+        let res = crate::authz::require_resource(
+            &*self.authority,
+            &self.db,
+            uid,
+            crate::authz::ResourceRef::new(kind, id),
+            min_role,
+        )
+        .await;
+        if matches!(res, Err(crate::authz::ResourceAuthzError::Forbidden)) {
+            // `min_role` is a fixed token and `id` an integer; only `kind` is
+            // app-supplied, so it's the only field that needs escaping.
+            let details = format!(
+                r#"{{"kind":"{}","id":{},"min_role":"{}"}}"#,
+                json_escape(kind),
+                id,
+                min_role.as_str(),
+            );
+            self.audit
+                .record(
+                    &self.db,
+                    crate::auth::audit::RESOURCE_ACCESS_DENIED,
+                    Some(uid),
+                    None,
+                    Some(&details),
+                )
+                .await;
+        }
+        res
+    }
+}
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for AuthzCtx {
+    type Rejection = (axum::http::StatusCode, &'static str);
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        // Infallible.
+        let audit = AuditCtx::from_request_parts(parts, state).await.unwrap();
+
+        let db = parts
+            .extensions
+            .get::<crate::pool::Pool>()
+            .cloned()
+            .ok_or((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "db pool not registered",
+            ))?;
+        let authority = parts
+            .extensions
+            .get::<crate::authz::SharedResourceAuthority>()
+            .cloned()
+            .ok_or((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "resource authority not registered",
+            ))?;
+
+        // Resolve the caller (API token, then session). A missing/anonymous
+        // caller is not an error here — it becomes a `None` user id that
+        // `require` denies.
+        let user_id = resolve_user_id(parts, state).await;
+
+        Ok(AuthzCtx {
+            user_id,
+            db,
+            authority,
+            audit,
+        })
+    }
+}
+
+/// Per-request handle to the app's
+/// [`ResourceAuthority`](crate::authz::ResourceAuthority) implementation,
+/// pulled from the `Arc<dyn ResourceAuthority>` extension the app registered
+/// (via [`AuthConfigBuilder::resource_authority`](crate::AuthConfigBuilder::resource_authority)
+/// or its own `Router::layer`). Server fns name it like any other extractor.
+///
+/// Rejects with `500` when no authority is registered: that's a wiring bug
+/// (the app forgot to register one), not a per-request authorization outcome,
+/// so it surfaces loudly rather than silently denying.
+pub struct ResourceAuthorityExt(pub crate::authz::SharedResourceAuthority);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ResourceAuthorityExt {
+    type Rejection = (axum::http::StatusCode, &'static str);
+
+    fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        let found = parts
+            .extensions
+            .get::<crate::authz::SharedResourceAuthority>()
+            .cloned();
+        std::future::ready(found.map(ResourceAuthorityExt).ok_or((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "resource authority not registered",
+        )))
     }
 }
