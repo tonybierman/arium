@@ -31,12 +31,13 @@ jobs:
           shared-key: ci
       # Test the library crates. The `examples/dioxus-*` binaries pull in the
       # dioxus devtools stack which is slow to build and isn't what we're
-      # testing. The `*-authz-example`s additionally build their adapter WITHOUT
-      # `mail`, which can't be unified into one workspace build alongside the
-      # `mail`-on fullstack examples (the `AuthConfig::builder` arity differs by
-      # feature), so they're excluded here and exercised in isolation instead.
+      # testing. The single-axis examples (`*-authz-example`, `dioxus-rbac-example`)
+      # additionally build their adapter WITHOUT `mail`, which can't be unified
+      # into one workspace build alongside the `mail`-on fullstack examples (the
+      # `AuthConfig::builder` arity differs by feature), so they're excluded here
+      # and exercised in isolation instead.
       - name: Test workspace
-        run: cargo test --workspace --exclude dioxus-fullstack-example --exclude dioxus-authz-example --exclude leptos-authz-example
+        run: cargo test --workspace --exclude dioxus-fullstack-example --exclude dioxus-authz-example --exclude dioxus-rbac-example --exclude leptos-authz-example --exclude leptos-rbac-example
       # Doctests above compile/run the `//!`/`///` code examples (rust / no_run
       # fences; `ignore` blocks are skipped). This additionally fails the build
       # on an unresolved intra-doc link (`[`Foo`]` that points nowhere), which
@@ -45,7 +46,7 @@ jobs:
       - name: Check intra-doc links resolve
         env:
           RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
-        run: cargo doc --no-deps --workspace --exclude dioxus-fullstack-example --exclude dioxus-authz-example --exclude leptos-fullstack-example --exclude leptos-authz-example
+        run: cargo doc --no-deps --workspace --exclude dioxus-fullstack-example --exclude dioxus-authz-example --exclude dioxus-rbac-example --exclude leptos-fullstack-example --exclude leptos-authz-example --exclude leptos-rbac-example
 
   # Access control is gated by in-process integration tests in the adapter
   # crates (crates/arium-{dioxus,leptos}/tests/access_control.rs), which the
@@ -213,9 +214,9 @@ jobs:
       #      findings in an auth library's request paths — but they're
       #      noisy in test code where unwrap is idiomatic, so we scope
       #      them to the lib target only.
-      - run: cargo clippy --workspace --exclude dioxus-fullstack-example --exclude dioxus-authz-example --exclude leptos-authz-example --all-targets -- -D warnings
+      - run: cargo clippy --workspace --exclude dioxus-fullstack-example --exclude dioxus-authz-example --exclude dioxus-rbac-example --exclude leptos-authz-example --exclude leptos-rbac-example --all-targets -- -D warnings
       - run: |
-          cargo clippy --workspace --exclude dioxus-fullstack-example --exclude dioxus-authz-example --exclude leptos-authz-example --lib -- \
+          cargo clippy --workspace --exclude dioxus-fullstack-example --exclude dioxus-authz-example --exclude dioxus-rbac-example --exclude leptos-authz-example --exclude leptos-rbac-example --lib -- \
             -D warnings \
             -W clippy::unwrap_used \
             -W clippy::expect_used \

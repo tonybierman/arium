@@ -1899,6 +1899,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dioxus-rbac-example"
+version = "0.1.0"
+dependencies = [
+ "arium-dioxus",
+ "axum",
+ "dioxus",
+ "dioxus-web",
+ "sqlx",
+]
+
+[[package]]
 name = "dioxus-router"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3455,6 +3466,23 @@ dependencies = [
 
 [[package]]
 name = "leptos-fullstack-example"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arium-leptos",
+ "axum",
+ "console_error_panic_hook",
+ "leptos",
+ "leptos_axum",
+ "leptos_meta",
+ "leptos_router",
+ "sqlx",
+ "tokio",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "leptos-rbac-example"
 version = "0.1.0"
 dependencies = [
  "anyhow",

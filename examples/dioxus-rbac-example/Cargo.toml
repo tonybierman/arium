@@ -1,0 +1,59 @@
+[package]
+name = "dioxus-rbac-example"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+# The smallest faithful demo of arium's *global RBAC* authorization in Dioxus:
+# roles carry flat permission *tokens*, a cosmetic `PermissionGate` shows/hides
+# a control based on the caller's token snapshot, and a server fn re-checks the
+# token on every request — the real boundary. A self-service "grant me the
+# editor role" toggle stands in for an admin assigning roles, so one fresh
+# account can watch both the allow and deny paths.
+#
+# This is arium's *first* authorization axis ("what is this user across the
+# whole app?"). For the *second* axis — a user's role on one resource — see
+# ../dioxus-authz-example. For the everything-on tour (OAuth / MFA / mail / API
+# tokens / admin console) see ../dioxus-fullstack-example.
+
+[dependencies]
+dioxus = { version = "0.7.9", features = ["fullstack"] }
+dioxus-web = { version = "0.7.9", features = ["hydrate"], optional = true }
+
+# The adapter, pulled in with only the UI components (for `PermissionGate` +
+# `LoginPanel`). No capability features — this example demonstrates one axis,
+# and building without `mail` means signup logs you straight in.
+arium-dioxus = { path = "../../crates/arium-dioxus", default-features = false, features = ["ui"] }
+
+# Server-only deps the binary touches directly: the sqlx pool and the axum
+# `Extension` extractor type the RBAC server fns take. No `async-trait`/`anyhow`
+# here — unlike the membership example, RBAC needs no app-implemented trait.
+axum = { version = "0.8.4", default-features = false, optional = true, features = ["macros"] }
+sqlx = { version = "0.8.6", default-features = false, features = [
+    "macros",
+    "migrate",
+    "runtime-tokio",
+], optional = true }
+
+[features]
+default = ["web", "server", "sqlite"]
+server = [
+    "dioxus/server",
+    "dep:axum",
+    "dep:sqlx",
+    "arium-dioxus/server",
+]
+web = ["dioxus/web", "dep:dioxus-web"]
+
+# Backend selection — enable exactly one, matching arium's compile-time choice.
+# `sqlite` ships by default; the `sqlx?/sqlite` weak-dep forwards the driver
+# only when `sqlx` is already present (i.e. via `server`), so the wasm client
+# never drags in the tokio `net` → `mio` stack. Mirrors the other examples.
+sqlite = ["arium-dioxus/sqlite", "sqlx?/sqlite"]
+postgres = ["arium-dioxus/postgres", "sqlx?/postgres"]
+
+# dioxus-web is dragged in only for its `["hydrate"]` feature — no call site for
+# cargo-machete to find, but dropping it silently disables hydration.
+[package.metadata.cargo-machete]
+ignored = ["dioxus-web"]
