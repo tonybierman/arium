@@ -48,7 +48,7 @@ pub mod server;
 /// own CSS. Since the theme ships in a body `<style>`, your override must come
 /// *after* it in document order to win the cascade — a plain `<head>` link
 /// loads first and loses. See the "Customizing the UI" section of
-/// `CONFIG_LEPTOS.md` for the mechanics.
+/// `docs/CONFIG_LEPTOS.md` for the mechanics.
 #[cfg(feature = "ui")]
 pub const DEFAULT_THEME_CSS: &str = include_str!("../assets/dx-components-theme.css");
 

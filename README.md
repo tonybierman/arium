@@ -63,8 +63,8 @@ you're wiring auth into a non-Dioxus, non-Leptos axum app.
 The install steps differ per framework (build tooling, feature flags,
 client/server split):
 
-- **Dioxus** → [INSTALL_DIOXUS.md](INSTALL_DIOXUS.md)
-- **Leptos** → [INSTALL_LEPTOS.md](INSTALL_LEPTOS.md)
+- **Dioxus** → [INSTALL_DIOXUS.md](docs/INSTALL_DIOXUS.md)
+- **Leptos** → [INSTALL_LEPTOS.md](docs/INSTALL_LEPTOS.md)
 
 ## Usage
 
@@ -89,8 +89,8 @@ The adapters wrap this in server functions and ship the matching UI screens.
 Full walkthroughs — server setup, client wiring, routes, login handling, and
 RBAC guards:
 
-- **Dioxus** → [USAGE_DIOXUS.md](USAGE_DIOXUS.md)
-- **Leptos** → [USAGE_LEPTOS.md](USAGE_LEPTOS.md)
+- **Dioxus** → [USAGE_DIOXUS.md](docs/USAGE_DIOXUS.md)
+- **Leptos** → [USAGE_LEPTOS.md](docs/USAGE_LEPTOS.md)
 
 End-to-end runnable apps live in [`examples/`](examples).
 
@@ -102,11 +102,11 @@ capabilities are compiled in (`oauth-github`, `mfa`, `mail`, `ratelimit`,
 driven entirely by environment variables; every feature degrades gracefully
 when its config is absent. Full feature and env-var reference:
 
-- **Dioxus** → [CONFIG_DIOXUS.md](CONFIG_DIOXUS.md)
-- **Leptos** → [CONFIG_LEPTOS.md](CONFIG_LEPTOS.md)
+- **Dioxus** → [CONFIG_DIOXUS.md](docs/CONFIG_DIOXUS.md)
+- **Leptos** → [CONFIG_LEPTOS.md](docs/CONFIG_LEPTOS.md)
 
 Branding and theming the drop-in UI (shared across both adapters) →
-[CUSTOMIZING.md](CUSTOMIZING.md).
+[CUSTOMIZING.md](docs/CUSTOMIZING.md).
 
 ## Security
 
@@ -125,7 +125,7 @@ by default:
   security-leaning `clippy` lints gate every PR, with nightly `trufflehog`,
   `cargo geiger`, and `cargo outdated` sweeps.
 
-See [SECURITY.md](SECURITY.md) for the full threat model, the hardening
+See [SECURITY.md](docs/SECURITY.md) for the full threat model, the hardening
 rationale behind each item, and how to report a vulnerability privately.
 
 ## Contributing

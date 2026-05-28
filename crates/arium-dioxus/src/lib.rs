@@ -34,7 +34,7 @@ pub mod ui;
 /// stylesheet and link it *after* this default so the cascade resolves to your
 /// values (override only the tokens you're changing) — or link yours instead of
 /// this one to replace the palette wholesale. See the "Customizing the UI"
-/// section of `CONFIG_DIOXUS.md` for the mechanics.
+/// section of `docs/CONFIG_DIOXUS.md` for the mechanics.
 #[cfg(feature = "ui")]
 pub use theme::DEFAULT_THEME_CSS;
 

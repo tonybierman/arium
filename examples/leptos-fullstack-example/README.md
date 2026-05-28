@@ -53,7 +53,7 @@ in `./data/` (host-owned, gitignored) — `rm -rf data` to start fresh.
 - Override the published port, `PUBLIC_BASE_URL`, SMTP creds, GitHub OAuth,
   etc. via `.env` (see `.env.example`). For the full arium config surface —
   Microsoft, generic OIDC, rate limiting, … — see
-  [CONFIG_LEPTOS.md](../../CONFIG_LEPTOS.md#environment-variables).
+  [CONFIG_LEPTOS.md](../../docs/CONFIG_LEPTOS.md#environment-variables).
 - After a code change, rebuild:
   `cargo leptos build --release && docker compose up -d --build`.
 

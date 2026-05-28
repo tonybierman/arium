@@ -17,7 +17,7 @@ fresh).
   it, verification/reset emails are written to `./emails/*.eml`.
 - Set `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET` to enable the GitHub
   button; set `SMTP_HOST` (+ creds) for real email. See
-  [CONFIG_DIOXUS.md](../../CONFIG_DIOXUS.md#environment-variables) for the full list.
+  [CONFIG_DIOXUS.md](../../docs/CONFIG_DIOXUS.md#environment-variables) for the full list.
 - For Google sign-in (OIDC), run `dx serve --features oauth-google` and set
   `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`.
 
@@ -52,7 +52,7 @@ in `./data/` (host-owned, gitignored) — `rm -rf data` to start fresh.
 - Override the published port, `PUBLIC_BASE_URL`, SMTP creds, GitHub OAuth,
   etc. via `.env` (see `.env.example`). For the full arium config surface —
   Microsoft, generic OIDC, rate limiting, … — see
-  [CONFIG_DIOXUS.md](../../CONFIG_DIOXUS.md#environment-variables).
+  [CONFIG_DIOXUS.md](../../docs/CONFIG_DIOXUS.md#environment-variables).
 - After a code change, re-bundle and rebuild:
   `dx bundle --release --platform web --package dioxus-fullstack-example && docker compose up -d --build`.
 
