@@ -72,6 +72,17 @@ pub struct AuthArgs {
     )]
     pub database_url: Option<String>,
 
+    /// Convenience shorthand for `--database-url sqlite://<PATH>?mode=rwc`.
+    /// Sqlite-only; mutually exclusive with `--database-url`.
+    #[cfg(feature = "gate-sqlite")]
+    #[arg(
+        long = "db",
+        value_name = "PATH",
+        global = true,
+        conflicts_with = "database_url"
+    )]
+    pub db: Option<String>,
+
     /// Skip the auth gate. Only honored on the per-extension verbs that
     /// opt into it (e.g. `migrate`, `users create`) AND only when no
     /// admin yet exists on the install. Refuses itself once an admin
@@ -81,12 +92,18 @@ pub struct AuthArgs {
 }
 
 impl AuthArgs {
-    /// Pick the database URL, applying the documented fallback chain.
+    /// Pick the database URL, applying the documented fallback chain:
+    /// `--database-url` → `--db <path>` (sqlite only) → `DATABASE_URL`
+    /// env (via clap's `env = ...`) → local sqlite default.
     pub fn resolve_database_url(&self) -> anyhow::Result<String> {
         if let Some(u) = &self.database_url
             && !u.is_empty()
         {
             return Ok(u.clone());
+        }
+        #[cfg(feature = "gate-sqlite")]
+        if let Some(path) = self.db.as_deref().filter(|p| !p.is_empty()) {
+            return Ok(format!("sqlite://{path}?mode=rwc"));
         }
         #[cfg(feature = "gate-sqlite")]
         {
