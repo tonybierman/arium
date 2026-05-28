@@ -935,6 +935,58 @@ pub async fn verify_password_user(
     Ok(VerifyOutcome::Verified(user_id))
 }
 
+/// Verify by `username` OR `email` plus password — same Argon2 path and
+/// constant-time miss handling as [`verify_password_user`], but the lookup
+/// matches either column.
+///
+/// Fills the gap from migration `0008_username_unique`: `username` became
+/// the unique stable handle, but the credential lookup had stayed
+/// email-only, so non-email entry points (e.g. the `act` CLI host) had no
+/// honest way to accept `-u <username>`. New consumers should prefer this
+/// over [`verify_password_user`] when the identifier comes from a free-form
+/// input that could be either form.
+pub async fn verify_password_by_identifier(
+    db: &Pool,
+    identifier: &str,
+    password: &str,
+) -> anyhow::Result<VerifyOutcome> {
+    use argon2::Argon2;
+    use argon2::password_hash::{PasswordHash, PasswordVerifier};
+
+    let row: Option<(i64, String, Option<i64>)> = sqlx::query_as(
+        "SELECT id, password_hash, email_verified_at FROM users \
+         WHERE (LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)) \
+         AND password_hash IS NOT NULL \
+         LIMIT 1",
+    )
+    .bind(identifier.trim())
+    .fetch_optional(db)
+    .await?;
+
+    let Some((user_id, stored_hash, verified_at)) = row else {
+        burn_password_verify(password);
+        return Ok(VerifyOutcome::Invalid);
+    };
+
+    let Ok(parsed) = PasswordHash::new(&stored_hash) else {
+        burn_password_verify(password);
+        return Ok(VerifyOutcome::Invalid);
+    };
+
+    if Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_err()
+    {
+        return Ok(VerifyOutcome::Invalid);
+    }
+
+    if verified_at.is_none() {
+        return Ok(VerifyOutcome::Unverified);
+    }
+
+    Ok(VerifyOutcome::Verified(user_id))
+}
+
 /// Issue a 24-hour email verification token for the given user.
 pub async fn issue_verification_token(db: &Pool, user_id: i64) -> anyhow::Result<String> {
     use argon2::password_hash::rand_core::{OsRng, RngCore};

@@ -1,0 +1,27 @@
+[package]
+name = "act"
+version.workspace = true
+edition.workspace = true
+description = "Extensible CLI host for arium — authenticated, RBAC-gated dispatcher to `act-<name>` extensions discovered on PATH."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "act"
+path = "src/main.rs"
+
+[features]
+default = ["sqlite"]
+sqlite = ["arium/sqlite", "sqlx/sqlite"]
+postgres = ["arium/postgres", "sqlx/postgres"]
+
+[dependencies]
+arium = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio"] }
+rpassword = "7"
+anyhow = "1"
+serde_json = "1"
