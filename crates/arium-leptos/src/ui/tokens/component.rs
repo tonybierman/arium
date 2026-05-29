@@ -16,7 +16,18 @@ use leptos::task::spawn_local;
 pub fn ApiTokens(
     #[prop(default = "API tokens")] title: &'static str,
     #[prop(default = "/")] back_href: &'static str,
+    /// When `true`, omit the full-viewport `.dx-auth-screen`/`.dx-auth-card`
+    /// centering shell and flatten the card so it renders inline (e.g. inside a
+    /// console pane). Defaults to `false` for standalone-route use. Mirrors the
+    /// Dioxus `ApiTokens` `embedded` prop.
+    #[prop(default = false)]
+    embedded: bool,
 ) -> impl IntoView {
+    // Empty classes collapse the centering shell to plain block wrappers; the
+    // flatten modifier rides on the Card (Leptos's Card takes no `style`).
+    let screen_class = if embedded { "" } else { "dx-auth-screen" };
+    let card_class = if embedded { "" } else { "dx-auth-card" };
+    let card_flat = if embedded { "dx-card-embedded" } else { "" };
     let profile = Resource::new(|| (), |_| async { get_current_user_profile().await });
     let tokens = Resource::new(|| (), |_| async { list_api_tokens().await });
     let new_name = RwSignal::new(String::new());
@@ -47,9 +58,9 @@ pub fn ApiTokens(
                 .unwrap_or(false);
             if !authed {
                 return view! {
-                    <div class="dx-auth-screen">
-                        <div class="dx-auth-card">
-                            <Card>
+                    <div class=screen_class>
+                        <div class=card_class>
+                            <Card class=card_flat>
                                 <CardHeader>
                                     <CardTitle>"Sign in required"</CardTitle>
                                 </CardHeader>
@@ -68,9 +79,9 @@ pub fn ApiTokens(
             let token_list: Vec<ApiTokenView> = tokens.get().and_then(|r| r.ok()).unwrap_or_default();
             let created = just_created.get();
             view! {
-                <div class="dx-auth-screen">
-                    <div class="dx-auth-card">
-                        <Card>
+                <div class=screen_class>
+                    <div class=card_class>
+                        <Card class=card_flat>
                             <CardHeader>
                                 <CardTitle>{title}</CardTitle>
                                 <CardDescription>

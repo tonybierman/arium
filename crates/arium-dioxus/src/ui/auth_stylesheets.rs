@@ -75,6 +75,9 @@ const SKELETON_CSS: Asset = asset!(
 // virtual_list ships only inline styles — its style.css is comment-only,
 // which manganis's css_module parser refuses. Nothing to pin here.
 const LOGIN_PANEL_CSS: Asset = asset!("/src/ui/login_panel/style.css", AssetOptions::css_module());
+// Admin console tables / detail layout (AdminUserList, AuditLog, role
+// editor). Always compiled — `ui::admin` is not feature-gated.
+const ADMIN_CSS: Asset = asset!("/src/ui/admin/style.css", AssetOptions::css_module());
 #[cfg(feature = "mail")]
 const FORGOT_PASSWORD_CSS: Asset = asset!(
     "/src/ui/forgot_password/style.css",
@@ -115,6 +118,7 @@ pub fn AuthStylesheets() -> Element {
         document::Stylesheet { href: AVATAR_CSS }
         document::Stylesheet { href: SKELETON_CSS }
         document::Stylesheet { href: LOGIN_PANEL_CSS }
+        document::Stylesheet { href: ADMIN_CSS }
         document::Stylesheet { href: VERIFY_EMAIL_CSS }
         {
             #[cfg(feature = "mail")]

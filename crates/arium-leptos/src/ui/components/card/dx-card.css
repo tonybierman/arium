@@ -10,6 +10,17 @@
   gap: 1.5rem;
 }
 
+/* Flattened card for embedded use (inside a console pane / tab). Mirrors the
+   inline `border:none; box-shadow:none; background:none` the Dioxus adapter
+   sets on its `embedded` Card — Leptos's Card takes no `style` prop, so the
+   flattening rides on this modifier class instead. Declared after `.dx-card`
+   so it wins on equal specificity. */
+.dx-card-embedded {
+  border: none;
+  background: none;
+  box-shadow: none;
+}
+
 .dx-card-header {
   display: grid;
   align-items: start;

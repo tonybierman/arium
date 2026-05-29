@@ -1,0 +1,43 @@
+[package]
+name = "arium-act-db"
+version.workspace = true
+edition.workspace = true
+description = "`act` extension: operator-grade DB administration for arium (migrate, users, roles, tokens, audit) backed entirely by existing `arium::*` public APIs."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+
+[[bin]]
+name = "act-db"
+path = "src/main.rs"
+
+# Binary-only crate: tell cargo-rdme to read the crate-level //! doc
+# from src/main.rs (the act-db binary) instead of a missing lib.rs.
+[package.metadata.cargo-rdme]
+entrypoint = { type = "bin", name = "act-db" }
+
+[features]
+default = ["sqlite"]
+sqlite = ["arium-act/gate-sqlite", "arium/sqlite"]
+postgres = ["arium-act/gate-postgres", "arium/postgres"]
+membership = ["arium/sql-membership"]
+
+[dependencies]
+# The gate SDK — auth + admin-check + audit + Pool builder live here.
+arium-act = { workspace = true }
+# Direct arium access for the per-verb operations the gate doesn't cover
+# (token mgmt, mfa, audit query/prune). The backend feature is forwarded
+# through us so `arium`'s Pool type and `arium-act`'s gate agree on
+# sqlite vs postgres at compile time.
+arium = { workspace = true, features = ["tokens", "mfa"] }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Used directly by the new-user / reset-password TTY prompt (separate
+# from the operator's auth prompt that `arium-act` owns). Cheap to keep
+# because it's already in the build graph via the gate's transitive deps.
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"

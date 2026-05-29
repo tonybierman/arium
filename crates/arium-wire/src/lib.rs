@@ -238,10 +238,15 @@ pub struct AuditEventView {
     pub actor_id: Option<i64>,
     /// Actor's email at the time of the event, denormalized for the viewer.
     pub actor_email: Option<String>,
+    /// Actor's current `@username` handle (joined from `users`; `None` if the
+    /// actor was a system process or has since been hard-deleted).
+    pub actor_username: Option<String>,
     /// User id the event acted on, when distinct from the actor.
     pub target_id: Option<i64>,
     /// Target's email at the time of the event, denormalized for the viewer.
     pub target_email: Option<String>,
+    /// Target's current `@username` handle (joined from `users`).
+    pub target_username: Option<String>,
     /// Source IP recorded at the time, when available.
     pub ip: Option<String>,
     /// User-Agent header recorded at the time, when available.

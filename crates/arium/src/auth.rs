@@ -935,6 +935,58 @@ pub async fn verify_password_user(
     Ok(VerifyOutcome::Verified(user_id))
 }
 
+/// Verify by `username` OR `email` plus password — same Argon2 path and
+/// constant-time miss handling as [`verify_password_user`], but the lookup
+/// matches either column.
+///
+/// Fills the gap from migration `0008_username_unique`: `username` became
+/// the unique stable handle, but the credential lookup had stayed
+/// email-only, so non-email entry points (e.g. the `act` CLI host) had no
+/// honest way to accept `-u <username>`. New consumers should prefer this
+/// over [`verify_password_user`] when the identifier comes from a free-form
+/// input that could be either form.
+pub async fn verify_password_by_identifier(
+    db: &Pool,
+    identifier: &str,
+    password: &str,
+) -> anyhow::Result<VerifyOutcome> {
+    use argon2::Argon2;
+    use argon2::password_hash::{PasswordHash, PasswordVerifier};
+
+    let row: Option<(i64, String, Option<i64>)> = sqlx::query_as(
+        "SELECT id, password_hash, email_verified_at FROM users \
+         WHERE (LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)) \
+         AND password_hash IS NOT NULL \
+         LIMIT 1",
+    )
+    .bind(identifier.trim())
+    .fetch_optional(db)
+    .await?;
+
+    let Some((user_id, stored_hash, verified_at)) = row else {
+        burn_password_verify(password);
+        return Ok(VerifyOutcome::Invalid);
+    };
+
+    let Ok(parsed) = PasswordHash::new(&stored_hash) else {
+        burn_password_verify(password);
+        return Ok(VerifyOutcome::Invalid);
+    };
+
+    if Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_err()
+    {
+        return Ok(VerifyOutcome::Invalid);
+    }
+
+    if verified_at.is_none() {
+        return Ok(VerifyOutcome::Unverified);
+    }
+
+    Ok(VerifyOutcome::Verified(user_id))
+}
+
 /// Issue a 24-hour email verification token for the given user.
 pub async fn issue_verification_token(db: &Pool, user_id: i64) -> anyhow::Result<String> {
     use argon2::password_hash::rand_core::{OsRng, RngCore};
@@ -1444,8 +1496,8 @@ pub mod audit {
 
         let sql = format!(
             "SELECT e.id, e.occurred_at, e.event_type, \
-                    e.actor_id, ua.email AS actor_email, \
-                    e.target_id, ut.email AS target_email, \
+                    e.actor_id, ua.email AS actor_email, ua.username AS actor_username, \
+                    e.target_id, ut.email AS target_email, ut.username AS target_username, \
                     e.ip, e.user_agent, e.details \
              FROM audit_events e \
              LEFT JOIN users ua ON ua.id = e.actor_id \
@@ -1483,8 +1535,10 @@ pub mod audit {
                 event_type: r.event_type,
                 actor_id: r.actor_id,
                 actor_email: r.actor_email,
+                actor_username: r.actor_username,
                 target_id: r.target_id,
                 target_email: r.target_email,
+                target_username: r.target_username,
                 ip: r.ip,
                 user_agent: r.user_agent,
                 details: r.details,
@@ -1523,8 +1577,10 @@ pub mod audit {
         event_type: String,
         actor_id: Option<i64>,
         actor_email: Option<String>,
+        actor_username: Option<String>,
         target_id: Option<i64>,
         target_email: Option<String>,
+        target_username: Option<String>,
         ip: Option<String>,
         user_agent: Option<String>,
         details: Option<String>,

@@ -14,7 +14,7 @@ const ADMIN_CSS: Asset = asset!("/src/ui/admin/style.css", AssetOptions::css_mod
 #[css_module("/src/ui/admin/style.css")]
 struct Styles;
 
-const AUDIT_COLUMNS: &str = "--data-cols: minmax(10rem, 1.25fr) minmax(10rem, 1.25fr) minmax(8rem, 1fr) minmax(8rem, 1fr) minmax(6rem, 0.75fr) minmax(8rem, 1.5fr);";
+const AUDIT_COLUMNS: &str = "--data-cols: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1.25fr);";
 
 /// Filterable, paginated audit-log table. Requires `admin:audit:read`
 /// on the signed-in user; the server fn enforces this and the table
@@ -23,7 +23,6 @@ const AUDIT_COLUMNS: &str = "--data-cols: minmax(10rem, 1.25fr) minmax(10rem, 1.
 pub fn AuditLog() -> Element {
     let mut event_type = use_signal(String::new);
     let mut actor_id = use_signal(String::new);
-    let mut target_id = use_signal(String::new);
     let mut page = use_signal(|| 0i64);
     let page_size: i64 = 100;
 
@@ -45,12 +44,11 @@ pub fn AuditLog() -> Element {
 
     let mut apply = move |_| {
         let actor = actor_id.read().parse::<i64>().ok();
-        let target = target_id.read().parse::<i64>().ok();
         page.set(0);
         applied.set(AuditQuery {
             event_type: event_type.read().clone(),
             actor_id: actor,
-            target_id: target,
+            target_id: None,
             since: None,
             until: None,
             limit: page_size,
@@ -133,15 +131,6 @@ pub fn AuditLog() -> Element {
                             oninput: move |evt: FormEvent| actor_id.set(evt.value()),
                         }
                     }
-                    div { class: "auth-field",
-                        Label { html_for: "dx-audit-target", class: "auth-label", "Target user id" }
-                        Input {
-                            id: "dx-audit-target",
-                            value: "{target_id}",
-                            placeholder: "(any)",
-                            oninput: move |evt: FormEvent| target_id.set(evt.value()),
-                        }
-                    }
                     Button {
                         variant: ButtonVariant::Primary,
                         r#type: "submit",
@@ -170,9 +159,6 @@ fn EventTable(rows: Vec<AuditEventView>) -> Element {
                 div { "When" }
                 div { "Event" }
                 div { "Actor" }
-                div { "Target" }
-                div { "IP" }
-                div { "Details" }
             }
             VirtualList {
                 count,
@@ -191,37 +177,18 @@ fn EventTable(rows: Vec<AuditEventView>) -> Element {
 
 #[component]
 fn EventRow(row: AuditEventView) -> Element {
-    let actor = pretty_user(row.actor_id, row.actor_email.as_deref());
-    let target = pretty_user(row.target_id, row.target_email.as_deref());
-    let ip = row.ip.clone().unwrap_or_else(|| "—".to_string());
-    let details = row.details.clone().unwrap_or_default();
+    let actor = row
+        .actor_username
+        .clone()
+        .unwrap_or_else(|| "—".to_string());
     rsx! {
         div {
             class: Styles::data_row,
             role: "row",
             "data-static": "true",
             div { class: Styles::data_cell, "data-label": "When", "{row.occurred_at_iso}" }
-            div { class: Styles::data_cell, "data-label": "Event",
-                code { "{row.event_type}" }
-            }
+            div { class: Styles::data_cell, "data-label": "Event", "{row.event_type}" }
             div { class: Styles::data_cell, "data-label": "Actor", "{actor}" }
-            div { class: Styles::data_cell, "data-label": "Target", "{target}" }
-            div { class: Styles::data_cell, "data-label": "IP", "{ip}" }
-            div { class: Styles::data_cell, "data-label": "Details",
-                if !details.is_empty() {
-                    code { "{details}" }
-                } else {
-                    "—"
-                }
-            }
         }
-    }
-}
-
-fn pretty_user(id: Option<i64>, email: Option<&str>) -> String {
-    match (id, email) {
-        (Some(i), Some(e)) => format!("{e} (#{i})"),
-        (Some(i), None) => format!("#{i}"),
-        _ => "—".to_string(),
     }
 }

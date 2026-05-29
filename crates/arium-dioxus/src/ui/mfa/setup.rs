@@ -35,6 +35,11 @@ struct Styles;
 pub fn MfaSetup(
     #[props(default = "Two-factor authentication")] title: &'static str,
     #[props(default = "/")] back_href: &'static str,
+    /// When `true`, omit the full-viewport `.dx-auth-screen`/`.dx-auth-card`
+    /// centering shell so the card renders inline (e.g. inside a tab or a
+    /// console pane). Defaults to `false` for standalone-route use.
+    #[props(default = false)]
+    embedded: bool,
 ) -> Element {
     let profile = use_resource(get_current_user_profile);
     let mut status = use_resource(get_mfa_status);
@@ -44,13 +49,33 @@ pub fn MfaSetup(
     let mut info_message = use_signal(String::new);
     let mut busy = use_signal(|| false);
 
+    // Empty classes collapse the centering shell to plain block wrappers.
+    let screen_class = if embedded {
+        String::new()
+    } else {
+        Styles::dx_auth_screen.to_string()
+    };
+    let card_class = if embedded {
+        String::new()
+    } else {
+        Styles::dx_auth_card.to_string()
+    };
+    // Inline override beats `.dx-card` by specificity, so an embedded card
+    // sits flat in its pane (no border/background/shadow) instead of as a
+    // boxed panel — matching the inline `AccountSettings` look.
+    let card_style = if embedded {
+        "border: none; box-shadow: none; background: none;"
+    } else {
+        ""
+    };
+
     let current = profile().and_then(|r| r.ok()).unwrap_or_default();
 
     if !current.is_authenticated {
         return rsx! {
             document::Stylesheet { href: MFA_CSS }
-            div { class: Styles::dx_auth_screen,
-                div { class: Styles::dx_auth_card,
+            div { class: screen_class,
+                div { class: card_class,
                     Card {
                         CardHeader { CardTitle { "Sign in required" } }
                         CardContent {
@@ -69,9 +94,10 @@ pub fn MfaSetup(
 
     rsx! {
         document::Stylesheet { href: MFA_CSS }
-        div { class: Styles::dx_auth_screen,
-            div { class: Styles::dx_auth_card,
+        div { class: screen_class,
+            div { class: card_class,
                 Card {
+                    style: card_style,
                     CardHeader {
                         CardTitle { "{title}" }
                         CardDescription {

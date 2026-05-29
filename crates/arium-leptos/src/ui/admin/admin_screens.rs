@@ -17,8 +17,10 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use std::collections::HashMap;
 
-const USER_COLUMNS: &str =
-    "--data-cols: minmax(10rem, 2fr) minmax(10rem, 2fr) minmax(8rem, 1.25fr) minmax(8rem, 1.25fr);";
+// Full grid is User / Roles / Status; phone portrait drops Status (see the
+// portrait media query in style.css), so the portrait template is 2 tracks.
+const USER_COLUMNS: &str = "--data-cols: minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1.25fr); \
+     --data-cols-portrait: minmax(0, 2fr) minmax(0, 1.5fr);";
 
 /// Paginated user list. Renders 100 users at a time; clicking a row fires
 /// `on_select(user_id)`.
@@ -58,10 +60,9 @@ pub fn AdminUserList(on_select: Callback<i64>) -> impl IntoView {
                     view! {
                         <div class="data-list" style=USER_COLUMNS>
                             <div class="data-header" role="row">
-                                <div>"User"</div>
-                                <div>"Email"</div>
-                                <div>"Roles"</div>
-                                <div>"Status"</div>
+                                <div class="data-cell" data-label="User">"User"</div>
+                                <div class="data-cell" data-label="Roles">"Roles"</div>
+                                <div class="data-cell" data-label="Status">"Status"</div>
                             </div>
                             <VirtualList class="data-virtual">
                                 {list
@@ -127,16 +128,20 @@ fn AdminUserRow(
                 .unwrap_or_else(|| format!("role:{r}"))
         })
         .collect();
-    let (status_label, status_variant) = if user.deleted {
-        ("deleted", BadgeVariant::Destructive)
+    let status_label = if user.deleted {
+        "deleted"
     } else if user.anonymous {
-        ("anonymous", BadgeVariant::Outline)
+        "anonymous"
     } else if !user.email_verified {
-        ("unverified", BadgeVariant::Secondary)
+        "unverified"
     } else {
-        ("active", BadgeVariant::Primary)
+        "active"
     };
-    let email = user.email.clone().unwrap_or_default();
+    let roles_label = if role_labels.is_empty() {
+        "—".to_string()
+    } else {
+        role_labels.join(", ")
+    };
     let mfa = user.mfa_enabled;
 
     view! {
@@ -158,24 +163,14 @@ fn AdminUserRow(
                 " "
                 <small>{format!("#{id}")}</small>
             </div>
-            <div class="data-cell" data-label="Email">
-                {email}
-            </div>
             <div class="data-cell" data-label="Roles">
-                <span class="admin-row-roles">
-                    {role_labels
-                        .into_iter()
-                        .map(|name| view! { <Badge variant=BadgeVariant::Secondary>{name}</Badge> })
-                        .collect_view()}
-                </span>
+                {roles_label}
             </div>
             <div class="data-cell" data-label="Status">
-                <span class="admin-row-roles">
-                    <Badge variant=status_variant>{status_label}</Badge>
-                    <Show when=move || mfa>
-                        <Badge variant=BadgeVariant::Outline>"2FA"</Badge>
-                    </Show>
-                </span>
+                {status_label}
+                <Show when=move || mfa>
+                    " · 2FA"
+                </Show>
             </div>
         </div>
     }

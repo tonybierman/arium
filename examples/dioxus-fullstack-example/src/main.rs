@@ -17,7 +17,6 @@ use arium_dioxus::ui::components::card::{
 };
 use arium_dioxus::ui::components::input::Input;
 use arium_dioxus::ui::components::label::Label;
-use arium_dioxus::ui::components::tabs::{TabContent, TabList, TabTrigger, Tabs};
 use arium_dioxus::ui::{
     ApiTokens, ForgotPassword, LoginPanel, LoginSubmit, MfaChallenge, MfaSetup,
     OAuthProvidersProvider, PermissionGate, PermissionsProvider, Policy, RequirePermission,
@@ -181,6 +180,16 @@ fn app() -> Element {
     }
 }
 
+/// Which account surface the signed-in home sidebar has selected. Mirrors
+/// `AdminSection` — the logged-in home view uses the same sticky-sidebar /
+/// mobile-drawer console layout instead of a tabset.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HomeSection {
+    Account,
+    Mfa,
+    Tokens,
+}
+
 #[component]
 fn Home() -> Element {
     let perms = use_permissions();
@@ -199,6 +208,12 @@ fn Home() -> Element {
     let mut auth_error = use_signal(String::new);
     let mut pending_email = use_signal::<Option<String>>(|| None);
     let mut pending_mfa = use_signal(|| false);
+
+    // Signed-in console state: active sidebar section + mobile drawer open.
+    // Declared unconditionally (hooks must run every render) even though
+    // they're only read in the `logged_in` branch.
+    let mut section = use_signal(|| HomeSection::Account);
+    let mut nav_open = use_signal(|| false);
 
     let on_login_submit = move |submission: LoginSubmit| {
         auth_error.set(String::new());
@@ -223,55 +238,95 @@ fn Home() -> Element {
         });
     };
 
-    rsx! {
-        main { class: "app-shell",
-            if logged_in {
-                {
-                    let profile_for_tab = current.clone();
-                    rsx! {
-                        Tabs {
-                            default_value: "account".to_string(),
-                            TabList {
-                                TabTrigger { index: 0_usize, value: "account".to_string(), "Account" }
-                                TabTrigger { index: 1_usize, value: "mfa".to_string(),     "Two-factor auth" }
-                                TabTrigger { index: 2_usize, value: "tokens".to_string(),  "API tokens" }
-                                PermissionGate {
-                                    policy: admin_policy(),
-                                    // The TabTrigger primitive doesn't forward arbitrary
-                                    // attributes onto its inner button, so wrap it and let
-                                    // the click bubble into a navigation handler. The
-                                    // primitive's own click toggles tab state, but Home
-                                    // unmounts before that's visible.
-                                    span {
-                                        onclick: move |_| { navigator().push(Route::AdminPage); },
-                                        TabTrigger { index: 3_usize, value: "admin".to_string(), "Admin" }
-                                    }
-                                }
-                            }
-                            TabContent { index: 0_usize, value: "account".to_string(),
-                                ProfileCard { profile: profile_for_tab }
-                                arium_dioxus::ui::AccountSettings {}
-                            }
-                            TabContent { index: 1_usize, value: "mfa".to_string(),
-                                MfaSetup {}
-                            }
-                            TabContent { index: 2_usize, value: "tokens".to_string(),
-                                ApiTokens {}
-                            }
+    if logged_in {
+        let profile_for_tab = current.clone();
+        // Selecting a section also closes the mobile drawer.
+        let mut go = move |target: HomeSection| {
+            section.set(target);
+            nav_open.set(false);
+        };
+        let item_class = move |target: HomeSection| {
+            if section() == target {
+                "admin-nav-item is-active"
+            } else {
+                "admin-nav-item"
+            }
+        };
+        return rsx! {
+            div { class: "admin-layout",
+                button {
+                    class: "admin-hamburger",
+                    aria_label: "Toggle navigation",
+                    onclick: move |_| nav_open.set(!nav_open()),
+                    "☰ Menu"
+                }
+                if nav_open() {
+                    div {
+                        class: "admin-scrim",
+                        onclick: move |_| nav_open.set(false),
+                    }
+                }
+                aside {
+                    class: if nav_open() { "admin-sidebar admin-sidebar--open" } else { "admin-sidebar" },
+                    ProfileCard { profile: profile_for_tab }
+                    nav { class: "admin-nav",
+                        button {
+                            class: item_class(HomeSection::Account),
+                            onclick: move |_| go(HomeSection::Account),
+                            "Account"
                         }
-                        div { class: "app-actions-buttons",
-                            Button {
-                                variant: ButtonVariant::Outline,
-                                onclick: move |_| async move {
-                                    logout.call().await;
-                                    perms.refresh();
-                                },
-                                "Sign out"
+                        button {
+                            class: item_class(HomeSection::Mfa),
+                            onclick: move |_| go(HomeSection::Mfa),
+                            "Two-factor auth"
+                        }
+                        button {
+                            class: item_class(HomeSection::Tokens),
+                            onclick: move |_| go(HomeSection::Tokens),
+                            "API tokens"
+                        }
+                        PermissionGate {
+                            policy: admin_policy(),
+                            // Admin is a separate route, not an in-page section:
+                            // this item navigates rather than swapping the pane.
+                            button {
+                                class: "admin-nav-item",
+                                onclick: move |_| { navigator().push(Route::AdminPage); },
+                                "Admin"
                             }
                         }
                     }
+                    div { class: "app-actions-buttons",
+                        Button {
+                            variant: ButtonVariant::Outline,
+                            onclick: move |_| async move {
+                                logout.call().await;
+                                perms.refresh();
+                            },
+                            "Sign out"
+                        }
+                    }
                 }
-            } else if pending_mfa() {
+                main { class: "admin-content",
+                    match section() {
+                        HomeSection::Account => rsx! {
+                            arium_dioxus::ui::AccountSettings {}
+                        },
+                        HomeSection::Mfa => rsx! {
+                            MfaSetup { embedded: true }
+                        },
+                        HomeSection::Tokens => rsx! {
+                            ApiTokens { embedded: true }
+                        },
+                    }
+                }
+            }
+        };
+    }
+
+    rsx! {
+        main { class: "app-shell",
+            if pending_mfa() {
                 MfaChallenge {
                     on_logged_in: move |_| {
                         pending_mfa.set(false);
@@ -446,10 +501,22 @@ fn AccountSettingsPage() -> Element {
     }
 }
 
-/// Admin console: its own route, its own tabset. The whole page is gated
-/// behind `any_of` so a user with either users:read OR audit:read can land
-/// here; individual tab triggers are then pruned to the specific permission
-/// each surface needs.
+/// Which admin surface the sidebar currently has selected. Replaces the
+/// former tabset: the page is a single `/admin` route and the active
+/// section is in-page signal state rather than a URL.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AdminSection {
+    Users,
+    Audit,
+    Roles,
+}
+
+/// Admin console: its own route with a sticky sidebar nav. The whole page
+/// is gated behind `any_of` so a user with any single admin token can land
+/// here; individual sidebar items are then pruned to the specific
+/// permission each surface needs. On phones the sidebar collapses behind a
+/// hamburger toggle and slides in as an overlay drawer (see `.admin-*`
+/// rules in `assets/app.css`).
 #[component]
 fn AdminPage() -> Element {
     let perms = use_permissions();
@@ -461,72 +528,115 @@ fn AdminPage() -> Element {
     // Role pane state: None = list, Some(None) = new, Some(Some(id)) = edit.
     let mut role_pane = use_signal::<Option<Option<i64>>>(|| None);
 
-    let default_tab = if can_users {
-        "users"
+    // Default to the first section the user is actually permitted to see.
+    let default_section = if can_users {
+        AdminSection::Users
     } else if can_audit {
-        "audit"
+        AdminSection::Audit
     } else {
-        "roles"
-    }
-    .to_string();
+        AdminSection::Roles
+    };
+    let mut section = use_signal(|| default_section);
+    // Mobile drawer open/closed. Ignored at >=48rem where the sidebar is
+    // always laid out in the grid (see the media query in app.css).
+    let mut nav_open = use_signal(|| false);
+
+    // Selecting a section also closes the mobile drawer.
+    let mut go = move |target: AdminSection| {
+        section.set(target);
+        nav_open.set(false);
+    };
+    let item_class = move |target: AdminSection| {
+        if section() == target {
+            "admin-nav-item is-active"
+        } else {
+            "admin-nav-item"
+        }
+    };
 
     rsx! {
         RequirePermission {
             policy: admin_policy(),
             redirect_to: "/".to_string(),
-            main { class: "app-shell",
-                Tabs {
-                    default_value: default_tab,
-                    TabList {
-                        if can_users {
-                            TabTrigger { index: 0_usize, value: "users".to_string(), "Users" }
-                        }
-                        if can_audit {
-                            TabTrigger { index: 1_usize, value: "audit".to_string(), "Audit log" }
-                        }
-                        if can_roles {
-                            TabTrigger { index: 2_usize, value: "roles".to_string(), "Roles" }
-                        }
-                    }
-                    if can_users {
-                        TabContent { index: 0_usize, value: "users".to_string(),
-                            if let Some(uid) = selected() {
-                                arium_dioxus::ui::AdminUserDetail {
-                                    user_id: uid,
-                                    on_back: move |_| selected.set(None),
-                                }
-                            } else {
-                                arium_dioxus::ui::AdminUserList {
-                                    on_select: move |id: i64| selected.set(Some(id)),
-                                }
-                            }
-                        }
-                    }
-                    if can_audit {
-                        TabContent { index: 1_usize, value: "audit".to_string(),
-                            arium_dioxus::ui::AuditLog {}
-                        }
-                    }
-                    if can_roles {
-                        TabContent { index: 2_usize, value: "roles".to_string(),
-                            match role_pane() {
-                                Some(rid_opt) => rsx! {
-                                    arium_dioxus::ui::AdminRoleEditor {
-                                        role_id: rid_opt,
-                                        on_back: move |_| role_pane.set(None),
-                                    }
-                                },
-                                None => rsx! {
-                                    arium_dioxus::ui::AdminRoleList {
-                                        on_select: move |id: i64| role_pane.set(Some(Some(id))),
-                                        on_new: move |_| role_pane.set(Some(None)),
-                                    }
-                                },
-                            }
-                        }
+            div { class: "admin-layout",
+                button {
+                    class: "admin-hamburger",
+                    aria_label: "Toggle navigation",
+                    onclick: move |_| nav_open.set(!nav_open()),
+                    "☰ Menu"
+                }
+                if nav_open() {
+                    div {
+                        class: "admin-scrim",
+                        onclick: move |_| nav_open.set(false),
                     }
                 }
-                p { class: "auth-aux", a { href: "/", "← Back to home" } }
+                aside {
+                    class: if nav_open() { "admin-sidebar admin-sidebar--open" } else { "admin-sidebar" },
+                    h2 { class: "admin-brand", "Admin" }
+                    nav { class: "admin-nav",
+                        if can_users {
+                            button {
+                                class: item_class(AdminSection::Users),
+                                onclick: move |_| go(AdminSection::Users),
+                                "Users"
+                            }
+                        }
+                        if can_audit {
+                            button {
+                                class: item_class(AdminSection::Audit),
+                                onclick: move |_| go(AdminSection::Audit),
+                                "Audit log"
+                            }
+                        }
+                        if can_roles {
+                            button {
+                                class: item_class(AdminSection::Roles),
+                                onclick: move |_| go(AdminSection::Roles),
+                                "Roles"
+                            }
+                        }
+                    }
+                    p { class: "auth-aux", a { href: "/", "← Back to home" } }
+                }
+                main { class: "admin-content",
+                    match section() {
+                        AdminSection::Users if can_users => {
+                            if let Some(uid) = selected() {
+                                rsx! {
+                                    arium_dioxus::ui::AdminUserDetail {
+                                        user_id: uid,
+                                        on_back: move |_| selected.set(None),
+                                    }
+                                }
+                            } else {
+                                rsx! {
+                                    arium_dioxus::ui::AdminUserList {
+                                        on_select: move |id: i64| selected.set(Some(id)),
+                                    }
+                                }
+                            }
+                        }
+                        AdminSection::Audit if can_audit => rsx! {
+                            arium_dioxus::ui::AuditLog {}
+                        },
+                        AdminSection::Roles if can_roles => match role_pane() {
+                            Some(rid_opt) => rsx! {
+                                arium_dioxus::ui::AdminRoleEditor {
+                                    role_id: rid_opt,
+                                    on_back: move |_| role_pane.set(None),
+                                }
+                            },
+                            None => rsx! {
+                                arium_dioxus::ui::AdminRoleList {
+                                    on_select: move |id: i64| role_pane.set(Some(Some(id))),
+                                    on_new: move |_| role_pane.set(Some(None)),
+                                }
+                            },
+                        },
+                        _ => rsx! {},
+                    }
+                }
             }
         }
     }

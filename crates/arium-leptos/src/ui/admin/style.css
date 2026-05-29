@@ -90,26 +90,26 @@
   color: var(--secondary-color-5);
 }
 
-/* Narrow viewport: stack each row's cells with their label, hide the
-   shared header. */
-@media (max-width: 40rem) {
-  .data-header {
-    display: none;
-  }
+/* The data tables keep their column grid at every width (no stacked-card
+   collapse on phones). Column tracks use a 0 minimum so the grid shrinks
+   to fit narrow viewports instead of overflowing; cell content wraps via
+   `overflow-wrap: anywhere` above. */
+
+/* Phone portrait: drop the least-essential columns to give the primary
+   ones room. Each list sets `--data-cols-portrait` with the reduced track
+   count (falling back to the full `--data-cols` when unset, e.g. the audit
+   log keeps all its columns), and the matching cells are hidden by their
+   `data-label`. Both the header and the body rows carry `.data-cell` +
+   `data-label`, so one rule hides the whole column. */
+@media (orientation: portrait) and (max-width: 40rem) {
+  .data-header,
   .data-row {
-    grid-template-columns: 1fr;
-    gap: 0.375rem;
-    padding: 0.75rem 0.875rem;
+    grid-template-columns: var(--data-cols-portrait, var(--data-cols, 1fr));
   }
-  .data-cell[data-label]::before {
-    content: attr(data-label);
-    display: block;
-    font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--secondary-color-5);
-    margin-bottom: 0.125rem;
+  .data-cell[data-label="Status"],
+  .data-cell[data-label="Tokens"],
+  .data-cell[data-label="Kind"] {
+    display: none;
   }
 }
 

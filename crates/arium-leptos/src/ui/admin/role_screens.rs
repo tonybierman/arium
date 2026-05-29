@@ -1,6 +1,5 @@
 use crate::friendly_server_error;
 use crate::server::{admin_create_role, admin_delete_role, admin_list_roles, admin_update_role};
-use crate::ui::components::badge::{Badge, BadgeVariant};
 use crate::ui::components::button::{Button, ButtonVariant};
 use crate::ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
 use crate::ui::components::input::Input;
@@ -11,8 +10,11 @@ use crate::wire::AdminRoleDetail;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-const ROLE_COLUMNS: &str =
-    "--data-cols: minmax(10rem, 1.5fr) minmax(12rem, 2fr) minmax(6rem, 1fr) minmax(6rem, 0.75fr);";
+// Full grid is Name / Description / Tokens / Kind; phone portrait drops
+// Tokens and Kind (see the portrait media query in style.css), so the
+// portrait template is 2 tracks.
+const ROLE_COLUMNS: &str = "--data-cols: minmax(0, 1.5fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 0.75fr); \
+     --data-cols-portrait: minmax(0, 1.5fr) minmax(0, 2fr);";
 
 /// Role browser. Clicking a row fires `on_select(role_id)`; "New role" fires
 /// `on_new(())`.
@@ -49,10 +51,10 @@ pub fn AdminRoleList(on_select: Callback<i64>, on_new: Callback<()>) -> impl Int
                     view! {
                         <div class="data-list" style=ROLE_COLUMNS>
                             <div class="data-header" role="row">
-                                <div>"Name"</div>
-                                <div>"Description"</div>
-                                <div>"Tokens"</div>
-                                <div>"Kind"</div>
+                                <div class="data-cell" data-label="Name">"Name"</div>
+                                <div class="data-cell" data-label="Description">"Description"</div>
+                                <div class="data-cell" data-label="Tokens">"Tokens"</div>
+                                <div class="data-cell" data-label="Kind">"Kind"</div>
                             </div>
                             <VirtualList class="data-virtual">
                                 {list
@@ -73,11 +75,6 @@ pub fn AdminRoleList(on_select: Callback<i64>, on_new: Callback<()>) -> impl Int
 fn AdminRoleRow(role: AdminRoleDetail, on_select: Callback<i64>) -> impl IntoView {
     let id = role.id;
     let kind_label = if role.is_system { "system" } else { "custom" };
-    let kind_variant = if role.is_system {
-        BadgeVariant::Outline
-    } else {
-        BadgeVariant::Secondary
-    };
     let token_count = role.permissions.len();
     let description = role.description.clone().unwrap_or_default();
 
@@ -107,7 +104,7 @@ fn AdminRoleRow(role: AdminRoleDetail, on_select: Callback<i64>) -> impl IntoVie
                 {token_count}
             </div>
             <div class="data-cell" data-label="Kind">
-                <Badge variant=kind_variant>{kind_label}</Badge>
+                {kind_label}
             </div>
         </div>
     }

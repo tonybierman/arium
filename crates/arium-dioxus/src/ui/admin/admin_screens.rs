@@ -17,8 +17,10 @@ use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::virtual_list::VirtualList;
 use crate::wire::AdminUserSummary;
 
-const USER_COLUMNS: &str =
-    "--data-cols: minmax(10rem, 2fr) minmax(10rem, 2fr) minmax(8rem, 1.25fr) minmax(8rem, 1.25fr);";
+// Full grid is User / Roles / Status; phone portrait drops Status (see the
+// portrait media query in style.css), so the portrait template is 2 tracks.
+const USER_COLUMNS: &str = "--data-cols: minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1.25fr); \
+     --data-cols-portrait: minmax(0, 2fr) minmax(0, 1.5fr);";
 
 /// Companion stylesheet for the admin tables / detail layout. Same trick
 /// the LoginPanel uses: render `document::Stylesheet` so the link tag is
@@ -63,10 +65,9 @@ pub fn AdminUserList(on_select: EventHandler<i64>) -> Element {
                     div {
                         class: Styles::data_header,
                         role: "row",
-                        div { "User" }
-                        div { "Email" }
-                        div { "Roles" }
-                        div { "Status" }
+                        div { class: Styles::data_cell, "data-label": "User", "User" }
+                        div { class: Styles::data_cell, "data-label": "Roles", "Roles" }
+                        div { class: Styles::data_cell, "data-label": "Status", "Status" }
                     }
                     VirtualList {
                         count,
@@ -144,14 +145,19 @@ fn AdminUserRow(
                 .unwrap_or_else(|| format!("role:{r}"))
         })
         .collect();
-    let (status_label, status_variant) = if user.deleted {
-        ("deleted", BadgeVariant::Destructive)
+    let status_label = if user.deleted {
+        "deleted"
     } else if user.anonymous {
-        ("anonymous", BadgeVariant::Outline)
+        "anonymous"
     } else if !user.email_verified {
-        ("unverified", BadgeVariant::Secondary)
+        "unverified"
     } else {
-        ("active", BadgeVariant::Primary)
+        "active"
+    };
+    let roles_label = if role_labels.is_empty() {
+        "—".to_string()
+    } else {
+        role_labels.join(", ")
     };
 
     rsx! {
@@ -172,22 +178,11 @@ fn AdminUserRow(
                 " "
                 small { "#{id}" }
             }
-            div { class: Styles::data_cell, "data-label": "Email",
-                "{user.email.clone().unwrap_or_default()}"
-            }
-            div { class: Styles::data_cell, "data-label": "Roles",
-                span { class: Styles::admin_row_roles,
-                    for name in role_labels.iter() {
-                        Badge { key: "{name}", variant: BadgeVariant::Secondary, "{name}" }
-                    }
-                }
-            }
+            div { class: Styles::data_cell, "data-label": "Roles", "{roles_label}" }
             div { class: Styles::data_cell, "data-label": "Status",
-                span { class: Styles::admin_row_roles,
-                    Badge { variant: status_variant, "{status_label}" }
-                    if user.mfa_enabled {
-                        Badge { variant: BadgeVariant::Outline, "2FA" }
-                    }
+                "{status_label}"
+                if user.mfa_enabled {
+                    " · 2FA"
                 }
             }
         }

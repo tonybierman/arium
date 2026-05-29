@@ -8,7 +8,7 @@ use crate::ui::components::virtual_list::VirtualList;
 use crate::wire::{AuditEventView, AuditQuery};
 use leptos::prelude::*;
 
-const AUDIT_COLUMNS: &str = "--data-cols: minmax(10rem, 1.25fr) minmax(10rem, 1.25fr) minmax(8rem, 1fr) minmax(8rem, 1fr) minmax(6rem, 0.75fr) minmax(8rem, 1.5fr);";
+const AUDIT_COLUMNS: &str = "--data-cols: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1.25fr);";
 
 /// Filterable, paginated audit-log table. Requires `admin:audit:read`; the
 /// server fn enforces it and the table renders an error if the caller isn't
@@ -17,7 +17,6 @@ const AUDIT_COLUMNS: &str = "--data-cols: minmax(10rem, 1.25fr) minmax(10rem, 1.
 pub fn AuditLog() -> impl IntoView {
     let event_type = RwSignal::new(String::new());
     let actor_id = RwSignal::new(String::new());
-    let target_id = RwSignal::new(String::new());
     let page = RwSignal::new(0i64);
     let page_size: i64 = 100;
 
@@ -40,12 +39,11 @@ pub fn AuditLog() -> impl IntoView {
 
     let apply = move || {
         let actor = actor_id.get_untracked().trim().parse::<i64>().ok();
-        let target = target_id.get_untracked().trim().parse::<i64>().ok();
         page.set(0);
         applied.set(AuditQuery {
             event_type: event_type.get_untracked(),
             actor_id: actor,
-            target_id: target,
+            target_id: None,
             since: None,
             until: None,
             limit: page_size,
@@ -88,17 +86,6 @@ pub fn AuditLog() -> impl IntoView {
                             value=actor_id
                             placeholder="(any)"
                             on_input=Callback::new(move |v: String| actor_id.set(v))
-                        />
-                    </div>
-                    <div class="auth-field">
-                        <Label html_for="dx-audit-target" class="auth-label">
-                            "Target user id"
-                        </Label>
-                        <Input
-                            id="dx-audit-target"
-                            value=target_id
-                            placeholder="(any)"
-                            on_input=Callback::new(move |v: String| target_id.set(v))
                         />
                     </div>
                     <Button variant=ButtonVariant::Primary button_type="submit" class="auth-submit">
@@ -164,9 +151,6 @@ fn EventTable(rows: Vec<AuditEventView>) -> impl IntoView {
                 <div>"When"</div>
                 <div>"Event"</div>
                 <div>"Actor"</div>
-                <div>"Target"</div>
-                <div>"IP"</div>
-                <div>"Details"</div>
             </div>
             <VirtualList class="data-virtual">
                 {rows.into_iter().map(|row| view! { <EventRow row=row /> }).collect_view()}
@@ -178,42 +162,21 @@ fn EventTable(rows: Vec<AuditEventView>) -> impl IntoView {
 
 #[component]
 fn EventRow(row: AuditEventView) -> impl IntoView {
-    let actor = pretty_user(row.actor_id, row.actor_email.as_deref());
-    let target = pretty_user(row.target_id, row.target_email.as_deref());
-    let ip = row.ip.clone().unwrap_or_else(|| "—".to_string());
-    let details = row.details.clone().unwrap_or_default();
+    let actor = row
+        .actor_username
+        .clone()
+        .unwrap_or_else(|| "—".to_string());
     view! {
         <div class="data-row" role="row" data-static="true">
             <div class="data-cell" data-label="When">
                 {row.occurred_at_iso}
             </div>
             <div class="data-cell" data-label="Event">
-                <code>{row.event_type}</code>
+                {row.event_type}
             </div>
             <div class="data-cell" data-label="Actor">
                 {actor}
             </div>
-            <div class="data-cell" data-label="Target">
-                {target}
-            </div>
-            <div class="data-cell" data-label="IP">
-                {ip}
-            </div>
-            <div class="data-cell" data-label="Details">
-                {if details.is_empty() {
-                    view! { "—" }.into_any()
-                } else {
-                    view! { <code>{details}</code> }.into_any()
-                }}
-            </div>
         </div>
-    }
-}
-
-fn pretty_user(id: Option<i64>, email: Option<&str>) -> String {
-    match (id, email) {
-        (Some(i), Some(e)) => format!("{e} (#{i})"),
-        (Some(i), None) => format!("#{i}"),
-        _ => "—".to_string(),
     }
 }

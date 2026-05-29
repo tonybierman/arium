@@ -1,0 +1,62 @@
+[package]
+name = "arium-act"
+version.workspace = true
+edition.workspace = true
+description = "Extensible CLI host for arium plus an authoring SDK (`arium_act::gate`) that extensions use to plug into the host's `-u`/`-p`/admin-role gate. Ships the `act` binary."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+
+[package.metadata.cargo-machete]
+# `tokio` is never referenced from this crate's source — it is enabled by the
+# `gate-*` features so the sqlx `runtime-tokio` surface links for consumers.
+# See the comment on `[features]` below.
+ignored = ["tokio"]
+
+[[bin]]
+name = "act"
+path = "src/main.rs"
+
+[lib]
+# Defaults to the package name; consumers do `use arium_act::gate`.
+
+[features]
+# No default features — the binary alone needs only clap. Extensions
+# (e.g. arium-act-db) enable the gate via one of the two backend features
+# below, which pulls in the arium + sqlx + tokio + rpassword surface that
+# `gate` and `audit` need. Workspace feature unification means the binary
+# will link those deps too when any consumer activates them, but main.rs
+# never references them and release LTO strips them.
+gate-sqlite = [
+    "dep:arium",
+    "dep:tokio",
+    "dep:sqlx",
+    "dep:rpassword",
+    "dep:serde_json",
+    "dep:anyhow",
+    "arium/sqlite",
+    "sqlx/sqlite",
+]
+gate-postgres = [
+    "dep:arium",
+    "dep:tokio",
+    "dep:sqlx",
+    "dep:rpassword",
+    "dep:serde_json",
+    "dep:anyhow",
+    "arium/postgres",
+    "sqlx/postgres",
+]
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+
+# Gate-only deps — pulled in only when one of the `gate-*` features is on.
+arium = { workspace = true, optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio"], optional = true }
+rpassword = { version = "7", optional = true }
+serde_json = { version = "1", optional = true }
+anyhow = { version = "1", optional = true }
